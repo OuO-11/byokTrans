@@ -244,7 +244,13 @@ export function extractNovelContent(rawHtml, url) {
       
       const sangtacvietParagraphs = [];
       rawLines.forEach(line => {
-        const text = line.trim();
+        let text = line.trim();
+        
+        // [중요 알고리즘] 중국어 원문 복원 시 발생하는 띄어쓰기 찌꺼기 정제
+        // 한자는 띄어쓰기를 하지 않는 언어이므로, 불필요한 공백을 제거합니다.
+        // 이때 베트남어 성조 문자나 한국어 등이 훼손되지 않도록 '순수 한자 유니코드' 대역만 정밀 타겟팅합니다.
+        text = text.replace(/([\u4E00-\u9FFF\u3400-\u4DBF])\s+/g, '$1').replace(/\s+([\u4E00-\u9FFF\u3400-\u4DBF])/g, '$1');
+        
         // 중국어 원문은 짧은 단문일 수 있으므로 2글자 이상으로 필터링 기준 완화
         if (text && text.length >= 2 && !text.startsWith('http') && isNaN(text)) {
           sangtacvietParagraphs.push(text);
