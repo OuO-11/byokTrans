@@ -123,11 +123,11 @@ export function extractNovelContent(rawHtml, url) {
     const href = a.getAttribute('href') || '';
     if (!href) return;
 
-    if (text.includes('上一页') || text.includes('이전 페이지') || text.includes('이전화') || text.includes('上一章')) {
+    if (text.includes('上一页') || text.includes('이전 페이지') || text.includes('이전화') || text.includes('上一章') || text.includes('Chương trước')) {
       prevUrl = href;
-    } else if (text.includes('下一页') || text.includes('다음 페이지') || text.includes('다음화') || text.includes('下一章')) {
+    } else if (text.includes('下一页') || text.includes('다음 페이지') || text.includes('다음화') || text.includes('下一章') || text.includes('Chương sau') || text.includes('Tiếp')) {
       nextUrl = href;
-    } else if (text.includes('目录') || text.includes('목차') || text.includes('목록') || text.includes('返回书页')) {
+    } else if (text.includes('目录') || text.includes('목차') || text.includes('목록') || text.includes('返回书页') || text.includes('Mục lục')) {
       indexUrl = href;
     }
   });
@@ -217,6 +217,48 @@ export function extractNovelContent(rawHtml, url) {
     const chapters = doc.querySelector('#chapters') || doc.querySelector('.userstuff');
     if (chapters) {
       contentHtml = chapters.innerHTML;
+    }
+  } else if (url.includes('sangtacviet')) {
+    const contentBox = doc.querySelector('.contentbox');
+    if (contentBox) {
+      let r = "";
+      const w = function(n) {
+        n.childNodes.forEach(c => {
+          if (c.nodeType === 1) { // Node.ELEMENT_NODE
+            if (c.tagName === 'I') {
+              const t = c.getAttribute('t');
+              if (t) r += t;
+            } else if (c.tagName === 'BR') {
+              r += "\n";
+            } else if (c.tagName !== 'SCRIPT' && c.tagName !== 'STYLE') {
+              w(c);
+            }
+          } else if (c.nodeType === 3) { // Node.TEXT_NODE
+            r += c.textContent;
+          }
+        });
+      };
+      w(contentBox);
+      const res = r.trim();
+      const rawLines = res.split('\n');
+      
+      const sangtacvietParagraphs = [];
+      rawLines.forEach(line => {
+        const text = line.trim();
+        // 중국어 원문은 짧은 단문일 수 있으므로 2글자 이상으로 필터링 기준 완화
+        if (text && text.length >= 2 && !text.startsWith('http') && isNaN(text)) {
+          sangtacvietParagraphs.push(text);
+        }
+      });
+      
+      return {
+        title,
+        paragraphs: sangtacvietParagraphs,
+        prevUrl,
+        nextUrl,
+        indexUrl,
+        sourceLang: 'zh'
+      };
     }
   }
 

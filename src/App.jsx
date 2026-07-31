@@ -7,7 +7,7 @@ import { translateFullPage, extractNovelContent } from './parser.js';
 import { downloadCachedEpisodes } from './downloader.js';
 
 
-// 언어별 전용 기본 번역기 프롬프트 (프롬프트 1) 기본값 정의 (비구씨 정밀 번역 규칙 기반 탑재)
+// 언어별 전용 기본 번역기 프롬프트 (프롬프트 1) 기본값 정의
 const DEFAULT_BASE_PROMPTS = {
   chinese: `You are a professional literary translator specializing in translating Chinese web novels into natural, fluent, and engaging Korean. Follow these instructions:
 
@@ -33,7 +33,7 @@ const DEFAULT_BASE_PROMPTS = {
 6. Do NOT modify, remove, or add any HTML <p> tags or their id attributes. Only translate the text content inside each tag.`
 };
 
-// 리더기 테마 및 스타일 기본값 정의 (리디/카카페 감성의 웜 다크 테마 기본 장착)
+// 리더기 테마 및 스타일 기본값 정의
 const DEFAULT_READER_SETTINGS = {
   fontFamily: 'system-ui',
   fontColor: '#eaeae0',
@@ -76,7 +76,7 @@ const copyToClipboard = async (text) => {
   textArea.style.top = "-9999px";
   textArea.style.left = "-9999px";
   document.body.appendChild(textArea);
-  
+
   textArea.focus();
   textArea.select();
 
@@ -103,7 +103,7 @@ function App() {
     return cached ? JSON.parse(cached) : ['gemini-3.1-flash-lite'];
   });
   const [selectedModel, setSelectedModel] = useState('gemini-3.1-flash-lite');
-  
+
   // 프롬프트 1 (Base Prompt): 언어별 기본 번역기 프롬프트 상태
   const [basePrompts, setBasePrompts] = useState(() => {
     const cached = localStorage.getItem('noveltrans_base_prompts');
@@ -129,13 +129,13 @@ function App() {
     const cached = localStorage.getItem('noveltrans_reader_settings');
     return cached ? JSON.parse(cached) : DEFAULT_READER_SETTINGS;
   });
-  
+
   // 아코디언 접기/열기 상태
   const [showThemeCollapse, setShowThemeCollapse] = useState(true);
   const [showMiscCollapse, setShowMiscCollapse] = useState(true);
   const [showBasePromptCollapse, setShowBasePromptCollapse] = useState(true);
   const [showPresetPromptCollapse, setShowPresetPromptCollapse] = useState(true);
-  
+
   // 데이터 이전 및 iframe 리프레시 상태 변수
   const [importText, setImportText] = useState('');
   const [backupText, setBackupText] = useState('');
@@ -246,7 +246,7 @@ function App() {
         setActiveTab('translate');
       }
     };
-    
+
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
@@ -283,7 +283,7 @@ function App() {
         context: contextInfo
       };
       console.error("Reporting Error to Vercel Console:", errorPayload);
-      
+
       await fetch('/api/log_error', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -318,11 +318,11 @@ function App() {
         await openDB();
         const list = await getNovels();
         setNovels(list);
-        
+
         // API Key 로드
         const keys = getApiKeys();
         setApiKeysInput(keys.join('\n'));
-        
+
         // 프롬프트 로드
         setPromptsTree(getPromptsTree());
 
@@ -354,13 +354,13 @@ function App() {
   const filterActiveGlossary = (rawSubPrompt, originalTextSegment) => {
     if (!rawSubPrompt) return '';
     const lines = rawSubPrompt.split('\n');
-    
+
     const matchedLines = lines.filter(line => {
       const trimmed = line.trim();
       if (!trimmed) return false;
 
       const match = trimmed.match(/(.*?)(?:->|=|\:)/);
-      const keyword = match 
+      const keyword = match
         ? match[1].replace(/[-*\s]/g, '').trim()
         : trimmed.trim();
 
@@ -409,7 +409,7 @@ function App() {
       cleaned = cleaned.replace(/\/(\d+)\/?$/i, '');
       // ao3: 예: .../works/123/chapters/456 -> .../works/123
       cleaned = cleaned.replace(/\/chapters\/(\d+)/i, '');
-      
+
       const urlObj = new URL(cleaned);
       urlObj.searchParams.delete('chapterid');
       return urlObj.toString();
@@ -426,8 +426,8 @@ function App() {
       return false;
     }
     return (
-      url.match(/_(\d+)\.html/i) || 
-      url.match(/[?&]chapterid=(\d+)/i) || 
+      url.match(/_(\d+)\.html/i) ||
+      url.match(/[?&]chapterid=(\d+)/i) ||
       url.match(/\/chapters\/(\d+)/i) ||
       url.match(/\/(\d+)(?:\.html)?\/?$/i)
     );
@@ -514,7 +514,7 @@ function App() {
   const handleUrlChange = (e) => {
     const url = e.target.value;
     setInputUrl(url);
-    
+
     if (isNovelEpisodeUrl(url)) {
       setTransMode('viewer');
       const detectedChapter = detectChapterFromUrl(url);
@@ -627,7 +627,7 @@ function App() {
 
       try {
         const translatedBatch = await translateTextWithRotation(batchText, batchPrompt, model);
-        
+
         // 번역 결과를 실제 iframe 문서 노드에 즉시 주입 (실시간 화면 한글 변환!)
         const lines = translatedBatch.split('\n');
         const translationMap = {};
@@ -704,34 +704,34 @@ function App() {
       if (data.error) throw new Error(data.error);
 
       const tempTitle = data.html.match(/<title>(.*?)<\/title>/i)?.[1] || '번역된 소설';
-      const siteName = targetUrl.includes('52shuku') ? '52shuku' : targetUrl.includes('jjwxc') ? '진강문학성' : targetUrl.includes('ao3') ? 'AO3' : '기타';
+      const siteName = targetUrl.includes('sangtacviet') ? 'sangtacviet' : targetUrl.includes('52shuku') ? '52shuku' : targetUrl.includes('jjwxc') ? '진강문학성' : targetUrl.includes('ao3') ? 'AO3' : '기타';
 
-      const { title, paragraphs, prevUrl, nextUrl, indexUrl } = extractNovelContent(data.html, targetUrl);
-      
+      const { title, paragraphs, prevUrl, nextUrl, indexUrl, sourceLang } = extractNovelContent(data.html, targetUrl);
+
       if (!paragraphs || paragraphs.length === 0) {
         throw new Error('소설 본문을 사이트로부터 정상적으로 긁어오지 못했습니다. 본문이 있는 정상적인 뷰어 주소인지 확인해 주세요.');
       }
-      
+
       let translatedTitle = title;
       try {
         translatedTitle = await translateTextWithRotation(
-          title, 
-          "Translate this novel title into natural, clean Korean. Return ONLY the translated Korean text without any other explanations or punctuation.", 
+          title,
+          "Translate this novel title into natural, clean Korean. Return ONLY the translated Korean text without any other explanations or punctuation.",
           selectedModel
         );
       } catch (e) {
         console.warn("Title translation fallback:", e);
       }
-      
+
       const combinedTitle = `${translatedTitle.trim()} / ${title.trim()}`;
       setViewerTitle(combinedTitle);
       setViewerPrevUrl(prevUrl || '');
       setViewerNextUrl(nextUrl || '');
       setViewerIndexUrl(indexUrl || '');
-      
+
       const masterUrl = getNovelMasterUrl(targetUrl);
       const existingNovel = novels.find(n => n.masterUrl === masterUrl || n.title === combinedTitle || n.title === title);
-      
+
       let novelId;
       if (existingNovel) {
         novelId = existingNovel.id;
@@ -756,7 +756,7 @@ function App() {
           updatedAt: Date.now()
         });
       }
-      
+
       const updatedList = await getNovels();
       setNovels(updatedList);
 
@@ -789,10 +789,14 @@ function App() {
 
         const fullOriginalText = paragraphs.join('\n');
         const activeSubPrompt = filterActiveGlossary(rawSubPrompt, fullOriginalText);
-        
-        const baseSystemPrompt = activeSubPrompt 
-          ? `${basePrompt}\n\n[추가 특정 작품/용어 사전 지침]\n${activeSubPrompt}` 
-          : basePrompt;
+
+        // 파서가 sourceLang을 명시적으로 'zh'로 반환한 경우 중국어 프롬프트 강제 적용
+        const actualLang = sourceLang === 'zh' ? 'chinese' : selectedLang;
+        const finalBasePrompt = basePrompts[actualLang] || basePrompt;
+
+        const baseSystemPrompt = activeSubPrompt
+          ? `${finalBasePrompt}\n\n[추가 특정 작품/용어 사전 지침]\n${activeSubPrompt}`
+          : finalBasePrompt;
 
         const finalSystemPrompt = `${baseSystemPrompt}\n\nIMPORTANT: You must translate the user's text into Korean. Preserve the EXACT number of paragraphs and line breaks as the original text. Do not merge, skip, or reorder paragraphs. Only output the translated text. Do not output any conversational text. You MUST end your response with </main>.`;
 
@@ -821,13 +825,13 @@ function App() {
           const pendingRawText = joinedText;
 
           try {
-            let fullAiTextBuffer = ''; 
+            let fullAiTextBuffer = '';
 
             const handleStreamChunk = (chunk) => {
               fullAiTextBuffer = chunk;
-              
+
               const lines = fullAiTextBuffer.replace(/<[^>]*>/g, '').split('\n').map(l => l.trim()).filter(l => l.length > 0);
-              
+
               let maxProcessedIndex = -1;
               lines.forEach((line, i) => {
                 if (i < pendingIndices.length) {
@@ -867,16 +871,16 @@ function App() {
 
           } catch (streamErr) {
             console.warn(`[Stream Continuation Warning] Attempt ${continuationCount + 1} encountered error:`, streamErr);
-            
+
             if (cancelTranslationRef.current || streamErr.message?.includes('중단')) {
               throw streamErr;
             }
 
             const errMsg = streamErr.message || '';
-            
+
             if (errMsg.includes('ALL_KEYS_EXHAUSTED')) {
               alert(`[API 할당량 소진] 모든 API Key의 무료 제공량이 초과되었습니다.\n잠시 후(약 1분 뒤) 다시 '재번역'을 누르시거나, 새로운 API Key를 등록해 주세요.`);
-              break; 
+              break;
             } else if (errMsg.includes('status: 400')) {
               const userAgreed = window.confirm(`[API 요청 오류] 번역 요청 중 치명적인 문법/구조 오류가 발생했습니다.\n사유: status: 400 - ai 응답이 비어있거나 차단되었습니다.\n\n서버로 상세 오류 내역을 전송하시겠습니까?`);
               if (userAgreed) {
@@ -888,9 +892,9 @@ function App() {
                     url: targetUrl,
                     memo: 'AUTO-FATAL-REPORT: ' + (streamErr.message || String(streamErr))
                   })
-                }).catch(() => {});
+                }).catch(() => { });
               }
-              break; 
+              break;
             } else {
               if (continuationCount === maxContinuationAttempts - 1) {
                 alert(`[네트워크 오류] 일시적인 서버 불안정으로 번역이 실패했습니다.\n사유: ${errMsg}\n잠시 후 다시 시도해 주세요.`);
@@ -922,7 +926,7 @@ function App() {
           console.warn(`[Cache Aborted] Translation success rate too low (${successCount}/${paragraphs.length}). Not saving to DB.`);
         }
       }
-      
+
       getNovels().then(setNovels);
     } catch (err) {
       if (cancelTranslationRef.current || err.name === 'AbortError') {
@@ -977,13 +981,13 @@ function App() {
       if (data.error) throw new Error(data.error);
 
       const activeSubPrompt = filterActiveGlossary(rawSubPrompt, data.html);
-      const finalSystemPrompt = activeSubPrompt 
-        ? `${basePrompt}\n\n[추가 특정 작품/용어 사전 지침]\n${activeSubPrompt}` 
+      const finalSystemPrompt = activeSubPrompt
+        ? `${basePrompt}\n\n[추가 특정 작품/용어 사전 지침]\n${activeSubPrompt}`
         : basePrompt;
 
       setPageSystemPrompt(finalSystemPrompt);
       setTransProgress(5);
-      
+
       setIframeKey(prev => prev + 1);
       if (!fromPopState) {
         window.history.pushState({ isAppInternal: true, url: targetUrl, mode: 'page', chapter: null }, '', window.location.pathname);
@@ -1005,7 +1009,7 @@ function App() {
   const handleTranslateStart = () => {
     const finalMode = isNovelEpisodeUrl(inputUrl) ? 'viewer' : 'page';
     setTransMode(finalMode);
-    
+
     const detectedChapter = detectChapterFromUrl(inputUrl);
     setActiveViewerChapter(detectedChapter);
 
@@ -1024,7 +1028,7 @@ function App() {
     translationSessionIdRef.current += 1; // 웹페이지 모드 전용 세션 강제 만료
 
     const originalAbsoluteUrl = resolveAbsoluteUrl(inputUrlRef.current, clickedUrl);
-    
+
     if (isNovelEpisodeUrl(originalAbsoluteUrl)) {
       const detectedChapter = detectChapterFromUrl(originalAbsoluteUrl);
       setInputUrl(originalAbsoluteUrl);
@@ -1137,21 +1141,21 @@ function App() {
     try {
       const base64Str = await exportAllData();
       const jsonStr = decodeURIComponent(escape(atob(base64Str)));
-      
+
       const blob = new Blob([jsonStr], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      
+
       const now = new Date();
       const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
       link.download = `byoktrans_backup_${dateStr}.json`;
-      
+
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-      
+
       alert('보관함 백업 파일이 다운로드 폴더에 성공적으로 저장되었습니다.');
     } catch (err) {
       alert('백업 파일 생성에 실패했습니다: ' + err.message);
@@ -1196,7 +1200,7 @@ function App() {
         });
 
         alert('보관함 파일 복원이 성공적으로 완료되었습니다!');
-        
+
         const list = await getNovels();
         setNovels(list);
         getCacheStatistics().then(setCacheStats);
@@ -1281,7 +1285,7 @@ function App() {
         throw new Error(`서버 응답 오류 (Status: ${res.status}, Body: ${errorText || '없음'})`);
       }
       const resData = await res.json();
-      
+
       if (resData.status === 'submitted') {
         alert('피드백이 성공적으로 제출되었습니다. 감사합니다!');
       } else {
@@ -1366,20 +1370,20 @@ function App() {
       )}
 
       {/* 본문 콘텐츠: pageResult 및 viewer 탭에서는 여백 없이 full-width, 그 외에는 중앙 정렬 패딩 유지 */}
-      <main style={{ 
-        flex: 1, 
-        padding: (activeTab === 'pageResult' || activeTab === 'viewer') ? '0' : '20px', 
-        maxWidth: (activeTab === 'pageResult' || activeTab === 'viewer') ? '100%' : '650px', 
-        margin: '0 auto', 
-        width: '100%', 
-        boxSizing: 'border-box' 
+      <main style={{
+        flex: 1,
+        padding: (activeTab === 'pageResult' || activeTab === 'viewer') ? '0' : '20px',
+        maxWidth: (activeTab === 'pageResult' || activeTab === 'viewer') ? '100%' : '650px',
+        margin: '0 auto',
+        width: '100%',
+        boxSizing: 'border-box'
       }}>
-        
+
         {/* 탭 1: 보관함 (Library) */}
         {activeTab === 'library' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 'bold' }}>내 소설 보관함</h3>
-            
+
             {novels.length === 0 ? (
               <div style={{
                 textAlign: 'center',
@@ -1392,8 +1396,8 @@ function App() {
               </div>
             ) : (
               novels.map(novel => (
-                <div 
-                  key={novel.id} 
+                <div
+                  key={novel.id}
                   onClick={() => handleLoadNovel(novel)}
                   style={{
                     display: 'flex',
@@ -1411,14 +1415,14 @@ function App() {
                     <FolderHeart size={22} color="#e78284" />
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <h4 
+                    <h4
                       onClick={(e) => e.stopPropagation()}
-                      style={{ 
-                        margin: '0 0 6px 0', 
-                        fontSize: '15px', 
-                        fontWeight: 'bold', 
-                        overflowX: 'auto', 
-                        overflowY: 'hidden', 
+                      style={{
+                        margin: '0 0 6px 0',
+                        fontSize: '15px',
+                        fontWeight: 'bold',
+                        overflowX: 'auto',
+                        overflowY: 'hidden',
                         whiteSpace: 'nowrap',
                         scrollbarWidth: 'none',
                         msOverflowStyle: 'none'
@@ -1431,17 +1435,17 @@ function App() {
                       <span style={{ color: '#aab0a6' }}>마지막으로 읽은 회차: {novel.lastReadChapter}화</span>
                     </div>
                   </div>
-                  
+
                   {/* 조작 버튼 영역 */}
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    <button 
+                    <button
                       onClick={(e) => handleDownload(novel, e)}
                       style={{ background: 'none', border: 'none', color: '#a6d189', padding: '6px', cursor: 'pointer' }}
                       title="텍스트 파일 다운로드"
                     >
                       <Download size={18} />
                     </button>
-                    <button 
+                    <button
                       onClick={(e) => handleDeleteNovel(novel.id, novel.title, e)}
                       style={{ background: 'none', border: 'none', color: '#e78284', padding: '6px', cursor: 'pointer' }}
                       title="삭제"
@@ -1462,9 +1466,9 @@ function App() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <label style={{ fontSize: '13px', color: '#aab0a6' }}>소설 주소 (URL)</label>
-              <textarea 
+              <textarea
                 rows={3}
-                placeholder="예: https://www.52shuku.net/bl/..." 
+                placeholder="예: https://www.52shuku.net/bl/..."
                 value={inputUrl}
                 onChange={handleUrlChange}
                 style={{
@@ -1486,8 +1490,8 @@ function App() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 <label style={{ fontSize: '12px', color: '#aab0a6' }}>번역 모드 (언어 선택)</label>
-                <select 
-                  value={selectedLang} 
+                <select
+                  value={selectedLang}
                   onChange={(e) => {
                     setSelectedLang(e.target.value);
                     setSelectedPreset('default');
@@ -1500,11 +1504,11 @@ function App() {
                   <option value="japanese">일본어 번역기</option>
                 </select>
               </div>
-              
+
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 <label style={{ fontSize: '12px', color: '#aab0a6' }}>프롬프트 템플릿</label>
-                <select 
-                  value={selectedPreset} 
+                <select
+                  value={selectedPreset}
                   onChange={(e) => setSelectedPreset(e.target.value)}
                   style={{
                     backgroundColor: '#0e100e', border: '1px solid #242824', borderRadius: '8px', padding: '8px', color: '#e2e4e0'
@@ -1520,7 +1524,7 @@ function App() {
             </div>
 
             {/* 번역 기동 버튼 */}
-            <button 
+            <button
               onClick={handleTranslateStart}
               disabled={isTranslating}
               style={{
@@ -1550,7 +1554,7 @@ function App() {
             </button>
 
             {isTranslating && (
-              <button 
+              <button
                 onClick={() => {
                   cancelTranslationRef.current = true;
                   translationAbortControllerRef.current?.abort();
@@ -1583,7 +1587,7 @@ function App() {
         {/* 탭 3: 가독성 리더기 뷰어 (Viewer) */}
         {activeTab === 'viewer' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', position: 'relative', width: '100%' }}>
-            
+
             {/* 번역 진행률 플로팅 프로그래스 바 */}
             {isTranslating && (
               <div style={{
@@ -1609,7 +1613,7 @@ function App() {
                   <RefreshCw style={{ animation: 'spin 1.2s linear infinite' }} size={16} />
                   번역 진행 중 ({transProgress}%)
                 </span>
-                <button 
+                <button
                   onClick={() => {
                     cancelTranslationRef.current = true;
                     translationAbortControllerRef.current?.abort();
@@ -1632,8 +1636,8 @@ function App() {
             )}
 
             {/* 뷰어 상단 헤더 & 컨트롤 영역: 중앙에 정렬하고 양옆 20px 패딩을 주어 가독성 유지 */}
-            <div style={{ 
-              borderBottom: '1px solid #242824', 
+            <div style={{
+              borderBottom: '1px solid #242824',
               paddingBottom: '12px',
               paddingLeft: '20px',
               paddingRight: '20px',
@@ -1644,7 +1648,7 @@ function App() {
               boxSizing: 'border-box'
             }}>
               <div style={{ display: 'flex', gap: '8px', marginBottom: '8px', flexWrap: 'wrap' }}>
-                <button 
+                <button
                   onClick={() => {
                     setLastTranslateSubTab('translate');
                     setActiveTab('translate');
@@ -1654,16 +1658,16 @@ function App() {
                 >
                   ← 주소 입력창으로
                 </button>
-                <button 
+                <button
                   onClick={handleReportFeedback}
-                  style={{ 
-                    background: '#181c18', 
-                    border: '1px solid #ea999c', 
-                    color: '#ea999c', 
-                    padding: '6px 12px', 
-                    borderRadius: '6px', 
-                    cursor: 'pointer', 
-                    fontSize: '12px', 
+                  style={{
+                    background: '#181c18',
+                    border: '1px solid #ea999c',
+                    color: '#ea999c',
+                    padding: '6px 12px',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '12px',
                     fontWeight: 'bold',
                     display: 'flex',
                     alignItems: 'center',
@@ -1674,17 +1678,17 @@ function App() {
                   오류 제보
                 </button>
                 {!isTranslating && (
-                  <button 
+                  <button
                     onClick={() => {
                       startViewerTranslation(inputUrl, activeViewerChapter, true, false);
                     }}
-                    style={{ 
-                      background: 'linear-gradient(135deg, #81c784, #83c5be)', 
-                      border: 'none', 
-                      color: '#11111b', 
-                      padding: '6px 12px', 
-                      borderRadius: '6px', 
-                      cursor: 'pointer', 
+                    style={{
+                      background: 'linear-gradient(135deg, #81c784, #83c5be)',
+                      border: 'none',
+                      color: '#11111b',
+                      padding: '6px 12px',
+                      borderRadius: '6px',
+                      cursor: 'pointer',
                       fontSize: '12px',
                       fontWeight: 'bold'
                     }}
@@ -1700,7 +1704,7 @@ function App() {
             </div>
 
             {/* colomo.dev 기반 리더기 커스텀 및 대조 독서 뷰어 렌더링 */}
-            <div style={{ 
+            <div style={{
               fontFamily: readerSettings.fontFamily,
               color: readerSettings.fontColor,
               backgroundColor: readerSettings.bgColor,
@@ -1724,23 +1728,23 @@ function App() {
                 .map((p, idx) => {
                   const showOriginal = readerSettings.keepOriginalText && p.original && (readerSettings.opacity > 0 || clickedOriginals[idx]);
                   return (
-                    <div 
-                      key={idx} 
+                    <div
+                      key={idx}
                       onClick={() => handleParagraphClick(idx)}
-                      style={{ 
+                      style={{
                         textIndent: `${readerSettings.textIndent}em`,
                         cursor: (readerSettings.keepOriginalText && readerSettings.opacity === 0) ? 'pointer' : 'default'
                       }}
                     >
                       {/* 번역문 출력 */}
                       <p style={{ margin: 0, color: readerSettings.fontColor }}>{p.translated}</p>
-                      
+
                       {/* 원문 출력 (35단계 핵심: 투명도 0일 때 숨김 처리 및 개별 클릭 탭 오픈 지원) */}
                       {showOriginal && (
-                        <p style={{ 
-                          margin: '6px 0 0 0', 
-                          color: readerSettings.fontColor, 
-                          fontSize: '0.85em', 
+                        <p style={{
+                          margin: '6px 0 0 0',
+                          color: readerSettings.fontColor,
+                          fontSize: '0.85em',
                           opacity: readerSettings.opacity === 0 ? 0.5 : (readerSettings.opacity / 100)
                         }}>
                           {p.original}
@@ -1769,7 +1773,7 @@ function App() {
                 paddingRight: '20px'
               }}>
                 {viewerPrevUrl && (
-                  <button 
+                  <button
                     onClick={() => handleNavigateEpisode(viewerPrevUrl)}
                     style={{
                       backgroundColor: '#252630',
@@ -1787,7 +1791,7 @@ function App() {
                   </button>
                 )}
                 {viewerIndexUrl && (
-                  <button 
+                  <button
                     onClick={() => handleNavigateEpisode(viewerIndexUrl)}
                     style={{
                       backgroundColor: '#252630',
@@ -1805,7 +1809,7 @@ function App() {
                   </button>
                 )}
                 {viewerNextUrl && (
-                  <button 
+                  <button
                     onClick={() => handleNavigateEpisode(viewerNextUrl)}
                     style={{
                       backgroundColor: '#252630',
@@ -1831,16 +1835,16 @@ function App() {
         {activeTab === 'pageResult' && (
           <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 112px)' }}>
             {/* 상단 미니 헤더 바 */}
-            <div style={{ 
-              padding: '6px 12px', 
-              display: 'flex', 
-              gap: '8px', 
+            <div style={{
+              padding: '6px 12px',
+              display: 'flex',
+              gap: '8px',
               alignItems: 'center',
               backgroundColor: '#111311',
               borderBottom: '1px solid #222822',
               flexShrink: 0
             }}>
-              <button 
+              <button
                 onClick={() => {
                   setLastTranslateSubTab('translate');
                   setActiveTab('translate');
@@ -1889,7 +1893,7 @@ function App() {
               )}
             </div>
             {/* iframe — 여백 없이 풀스크린 (key 갱신을 통해 중복 로드 및 상태 오염 방지) */}
-            <iframe 
+            <iframe
               key={iframeKey}
               srcDoc={novelHtmlResult}
               title="Page Translation Result"
@@ -1914,10 +1918,10 @@ function App() {
             {/* 구글 API Key 및 모델 설정 */}
             <div style={{ backgroundColor: '#121212', padding: '16px', borderRadius: '14px', border: '1px solid #252630', display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <h4 style={{ margin: 0, fontSize: '14px', color: '#babbf1' }}>🔑 API & AI 모델 세팅</h4>
-              
+
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 <label style={{ fontSize: '12px', color: '#a5adce' }}>구글 API Key 목록 (줄바꿈 구분)</label>
-                <textarea 
+                <textarea
                   rows={2}
                   value={apiKeysInput}
                   onChange={(e) => setApiKeysInput(e.target.value)}
@@ -1930,7 +1934,7 @@ function App() {
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 <label style={{ fontSize: '12px', color: '#a5adce' }}>사용할 AI 모델</label>
-                <select 
+                <select
                   value={selectedModel}
                   onChange={(e) => setSelectedModel(e.target.value)}
                   style={{
@@ -1944,8 +1948,8 @@ function App() {
                   ))}
                 </select>
               </div>
-              
-              <button 
+
+              <button
                 onClick={handleSaveSettings}
                 style={{
                   backgroundColor: '#81c784', border: 'none', borderRadius: '8px', padding: '10px', color: '#11111b', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px'
@@ -1957,191 +1961,191 @@ function App() {
 
             {/* 프롬프트 1 (Base Prompt) */}
             <div style={{ backgroundColor: '#111311', padding: '0', borderRadius: '14px', border: '1px solid #222822', overflow: 'hidden' }}>
-              <div 
+              <div
                 onClick={() => setShowBasePromptCollapse(!showBasePromptCollapse)}
                 style={{ padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', backgroundColor: '#161816' }}
               >
                 <h4 style={{ margin: 0, fontSize: '14px', color: '#e5c07b' }}>🌐 1. 기본 언어 번역기 지침 (프롬프트 1)</h4>
                 {showBasePromptCollapse ? <ChevronUp size={16} color="#a5adce" /> : <ChevronDown size={16} color="#a5adce" />}
               </div>
-              
+
               {showBasePromptCollapse && (
                 <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <button 
-                  onClick={() => setSelectedLang('chinese')} 
-                  style={{
-                    flex: 1, padding: '8px', borderRadius: '6px', border: 'none',
-                    backgroundColor: selectedLang === 'chinese' ? '#e5c07b' : '#252630',
-                    color: selectedLang === 'chinese' ? '#11111b' : '#e2e4ed',
-                    fontWeight: 'bold', cursor: 'pointer', fontSize: '12px'
-                  }}
-                >
-                  중국어 기본지침
-                </button>
-                <button 
-                  onClick={() => setSelectedLang('japanese')} 
-                  style={{
-                    flex: 1, padding: '8px', borderRadius: '6px', border: 'none',
-                    backgroundColor: selectedLang === 'japanese' ? '#e5c07b' : '#252630',
-                    color: selectedLang === 'japanese' ? '#11111b' : '#e2e4ed',
-                    fontWeight: 'bold', cursor: 'pointer', fontSize: '12px'
-                  }}
-                >
-                  일본어 기본지침
-                </button>
-              </div>
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <button
+                      onClick={() => setSelectedLang('chinese')}
+                      style={{
+                        flex: 1, padding: '8px', borderRadius: '6px', border: 'none',
+                        backgroundColor: selectedLang === 'chinese' ? '#e5c07b' : '#252630',
+                        color: selectedLang === 'chinese' ? '#11111b' : '#e2e4ed',
+                        fontWeight: 'bold', cursor: 'pointer', fontSize: '12px'
+                      }}
+                    >
+                      중국어 기본지침
+                    </button>
+                    <button
+                      onClick={() => setSelectedLang('japanese')}
+                      style={{
+                        flex: 1, padding: '8px', borderRadius: '6px', border: 'none',
+                        backgroundColor: selectedLang === 'japanese' ? '#e5c07b' : '#252630',
+                        color: selectedLang === 'japanese' ? '#11111b' : '#e2e4ed',
+                        fontWeight: 'bold', cursor: 'pointer', fontSize: '12px'
+                      }}
+                    >
+                      일본어 기본지침
+                    </button>
+                  </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <label style={{ fontSize: '11px', color: '#a5adce' }}>
-                    {selectedLang === 'chinese' ? '중국어' : '일본어'} 번역의 기둥이 되는 시스템 지침입니다.
-                  </label>
-                  <button onClick={() => openPresetModal('basePrompt', basePrompts[selectedLang])} style={{ background: 'none', border: 'none', color: '#e5c07b', cursor: 'pointer', fontSize: '16px', padding: '0 4px', lineHeight: '1' }} title="전체화면 편집">
-                    ⛶
-                  </button>
-                </div>
-                <textarea 
-                  rows={6}
-                  value={basePrompts[selectedLang]}
-                  onChange={(e) => handleUpdateBasePrompt(selectedLang, e.target.value)}
-                  placeholder="언어별 기본 번역 지시 규칙을 입력하세요."
-                  style={{
-                    backgroundColor: '#222822', border: 'none', borderRadius: '8px', padding: '10px', color: '#e2e4ed', fontSize: '12px', fontFamily: 'monospace', lineHeight: '1.5'
-                  }}
-                />
-                <span style={{ fontSize: '11px', color: '#e5c07b', textAlign: 'right' }}>* 입력 즉시 임시 자동 저장됩니다.</span>
-              </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <label style={{ fontSize: '11px', color: '#a5adce' }}>
+                        {selectedLang === 'chinese' ? '중국어' : '일본어'} 번역의 기둥이 되는 시스템 지침입니다.
+                      </label>
+                      <button onClick={() => openPresetModal('basePrompt', basePrompts[selectedLang])} style={{ background: 'none', border: 'none', color: '#e5c07b', cursor: 'pointer', fontSize: '16px', padding: '0 4px', lineHeight: '1' }} title="전체화면 편집">
+                        ⛶
+                      </button>
+                    </div>
+                    <textarea
+                      rows={6}
+                      value={basePrompts[selectedLang]}
+                      onChange={(e) => handleUpdateBasePrompt(selectedLang, e.target.value)}
+                      placeholder="언어별 기본 번역 지시 규칙을 입력하세요."
+                      style={{
+                        backgroundColor: '#222822', border: 'none', borderRadius: '8px', padding: '10px', color: '#e2e4ed', fontSize: '12px', fontFamily: 'monospace', lineHeight: '1.5'
+                      }}
+                    />
+                    <span style={{ fontSize: '11px', color: '#e5c07b', textAlign: 'right' }}>* 입력 즉시 임시 자동 저장됩니다.</span>
+                  </div>
                 </div>
               )}
             </div>
 
             {/* 프롬프트 2 (Sub Preset) */}
             <div style={{ backgroundColor: '#111311', padding: '0', borderRadius: '14px', border: '1px solid #222822', overflow: 'hidden' }}>
-              <div 
+              <div
                 onClick={() => setShowPresetPromptCollapse(!showPresetPromptCollapse)}
                 style={{ padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', backgroundColor: '#161816' }}
               >
                 <h4 style={{ margin: 0, fontSize: '14px', color: '#83c5be' }}>📝 2. 작품별 추가 지침 프리셋 (프롬프트 2)</h4>
                 {showPresetPromptCollapse ? <ChevronUp size={16} color="#a5adce" /> : <ChevronDown size={16} color="#a5adce" />}
               </div>
-              
+
               {showPresetPromptCollapse && (
                 <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div style={{ display: 'flex', gap: '10px' }}>
-                <button 
-                  onClick={() => setSelectedLang('chinese')} 
-                  style={{
-                    flex: 1, padding: '8px', borderRadius: '6px', border: 'none',
-                    backgroundColor: selectedLang === 'chinese' ? '#83c5be' : '#222822',
-                    color: selectedLang === 'chinese' ? '#11111b' : '#e2e4ed',
-                    fontWeight: 'bold', cursor: 'pointer', fontSize: '12px'
-                  }}
-                >
-                  중국어 커스텀
-                </button>
-                <button 
-                  onClick={() => setSelectedLang('japanese')} 
-                  style={{
-                    flex: 1, padding: '8px', borderRadius: '6px', border: 'none',
-                    backgroundColor: selectedLang === 'japanese' ? '#83c5be' : '#222822',
-                    color: selectedLang === 'japanese' ? '#11111b' : '#e2e4ed',
-                    fontWeight: 'bold', cursor: 'pointer', fontSize: '12px'
-                  }}
-                >
-                  일본어 커스텀
-                </button>
-              </div>
-
-              {/* 현재 등록된 프리셋 리스트 - 클릭 시 하단 폼에 내용 로드 */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: '#a5adce' }}>현재 등록된 추가 프리셋 (클릭하면 수정)</label>
-                {Object.keys(currentPresets).map(presetId => (
-                  <div
-                    key={presetId}
-                    onClick={() => handleLoadPresetToForm(presetId)}
-                    style={{
-                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                      backgroundColor: editingPresetId === presetId ? '#1a2a1a' : '#222822',
-                      border: editingPresetId === presetId ? '1px solid #81c784' : '1px solid transparent',
-                      borderRadius: '8px', padding: '8px 12px',
-                      cursor: presetId !== 'default' ? 'pointer' : 'default'
-                    }}
-                  >
-                    <span style={{ fontSize: '13px', flex: 1, color: editingPresetId === presetId ? '#81c784' : '#e2e4ed' }}>
-                      {currentPresets[presetId].name}
-                    </span>
-                    {presetId !== 'default' && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleDeletePreset(presetId); }}
-                        style={{ background: 'none', border: 'none', color: '#e78284', cursor: 'pointer', fontSize: '11px', padding: '2px 6px' }}
-                      >
-                        삭제
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-
-              {/* 신규 등록 / 수정 폼 */}
-              <div style={{ borderTop: '1px solid #222822', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <label style={{ fontSize: '12px', color: editingPresetId ? '#81c784' : '#a5adce' }}>
-                    {editingPresetId ? '프리셋 수정 중 — 이름/내용 변경 후 저장' : '새 지침 추가'}
-                  </label>
-                  <button onClick={() => openPresetModal('newPresetContent', newPresetContent)} style={{ background: 'none', border: 'none', color: '#83c5be', cursor: 'pointer', fontSize: '16px', padding: '0 4px', lineHeight: '1' }} title="전체화면 편집">
-                    ⛶
-                  </button>
-                </div>
-                <input
-                  type="text" placeholder="예: 코난 덕질용 번역체"
-                  value={newPresetName}
-                  onChange={(e) => setNewPresetName(e.target.value)}
-                  style={{
-                    backgroundColor: '#222822',
-                    border: editingPresetId ? '1px solid #81c784' : 'none',
-                    borderRadius: '6px', padding: '8px', color: '#e2e4ed', fontSize: '12px'
-                  }}
-                />
-                <textarea
-                  rows={3}
-                  placeholder="특정 작품 고유명사 매핑 규칙을 한글/영어로 작성하세요. (예: 江户川柯南 -> 코난)"
-                  value={newPresetContent}
-                  onChange={(e) => setNewPresetContent(e.target.value)}
-                  style={{
-                    backgroundColor: '#222822',
-                    border: editingPresetId ? '1px solid #81c784' : 'none',
-                    borderRadius: '6px', padding: '8px', color: '#e2e4ed', fontSize: '12px'
-                  }}
-                />
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  {editingPresetId && (
+                  <div style={{ display: 'flex', gap: '10px' }}>
                     <button
-                      onClick={() => { setEditingPresetId(null); setNewPresetName(''); setNewPresetContent(''); }}
-                      style={{ flex: 1, backgroundColor: '#333', border: 'none', borderRadius: '8px', padding: '10px', color: '#e2e4ed', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' }}
+                      onClick={() => setSelectedLang('chinese')}
+                      style={{
+                        flex: 1, padding: '8px', borderRadius: '6px', border: 'none',
+                        backgroundColor: selectedLang === 'chinese' ? '#83c5be' : '#222822',
+                        color: selectedLang === 'chinese' ? '#11111b' : '#e2e4ed',
+                        fontWeight: 'bold', cursor: 'pointer', fontSize: '12px'
+                      }}
                     >
-                      취소
+                      중국어 커스텀
                     </button>
-                  )}
-                  <button
-                    onClick={handleAddCustomPreset}
-                    style={{
-                      flex: 2, backgroundColor: '#83c5be', border: 'none', borderRadius: '8px', padding: '10px', color: '#11111b', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px'
-                    }}
-                  >
-                    {editingPresetId ? '수정 저장' : '지침 프리셋 등록'}
-                  </button>
-                </div>
-              </div>
+                    <button
+                      onClick={() => setSelectedLang('japanese')}
+                      style={{
+                        flex: 1, padding: '8px', borderRadius: '6px', border: 'none',
+                        backgroundColor: selectedLang === 'japanese' ? '#83c5be' : '#222822',
+                        color: selectedLang === 'japanese' ? '#11111b' : '#e2e4ed',
+                        fontWeight: 'bold', cursor: 'pointer', fontSize: '12px'
+                      }}
+                    >
+                      일본어 커스텀
+                    </button>
+                  </div>
+
+                  {/* 현재 등록된 프리셋 리스트 - 클릭 시 하단 폼에 내용 로드 */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <label style={{ fontSize: '12px', color: '#a5adce' }}>현재 등록된 추가 프리셋 (클릭하면 수정)</label>
+                    {Object.keys(currentPresets).map(presetId => (
+                      <div
+                        key={presetId}
+                        onClick={() => handleLoadPresetToForm(presetId)}
+                        style={{
+                          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                          backgroundColor: editingPresetId === presetId ? '#1a2a1a' : '#222822',
+                          border: editingPresetId === presetId ? '1px solid #81c784' : '1px solid transparent',
+                          borderRadius: '8px', padding: '8px 12px',
+                          cursor: presetId !== 'default' ? 'pointer' : 'default'
+                        }}
+                      >
+                        <span style={{ fontSize: '13px', flex: 1, color: editingPresetId === presetId ? '#81c784' : '#e2e4ed' }}>
+                          {currentPresets[presetId].name}
+                        </span>
+                        {presetId !== 'default' && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleDeletePreset(presetId); }}
+                            style={{ background: 'none', border: 'none', color: '#e78284', cursor: 'pointer', fontSize: '11px', padding: '2px 6px' }}
+                          >
+                            삭제
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* 신규 등록 / 수정 폼 */}
+                  <div style={{ borderTop: '1px solid #222822', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <label style={{ fontSize: '12px', color: editingPresetId ? '#81c784' : '#a5adce' }}>
+                        {editingPresetId ? '프리셋 수정 중 — 이름/내용 변경 후 저장' : '새 지침 추가'}
+                      </label>
+                      <button onClick={() => openPresetModal('newPresetContent', newPresetContent)} style={{ background: 'none', border: 'none', color: '#83c5be', cursor: 'pointer', fontSize: '16px', padding: '0 4px', lineHeight: '1' }} title="전체화면 편집">
+                        ⛶
+                      </button>
+                    </div>
+                    <input
+                      type="text" placeholder="예: 코난 덕질용 번역체"
+                      value={newPresetName}
+                      onChange={(e) => setNewPresetName(e.target.value)}
+                      style={{
+                        backgroundColor: '#222822',
+                        border: editingPresetId ? '1px solid #81c784' : 'none',
+                        borderRadius: '6px', padding: '8px', color: '#e2e4ed', fontSize: '12px'
+                      }}
+                    />
+                    <textarea
+                      rows={3}
+                      placeholder="특정 작품 고유명사 매핑 규칙을 한글/영어로 작성하세요. (예: 江户川柯南 -> 코난)"
+                      value={newPresetContent}
+                      onChange={(e) => setNewPresetContent(e.target.value)}
+                      style={{
+                        backgroundColor: '#222822',
+                        border: editingPresetId ? '1px solid #81c784' : 'none',
+                        borderRadius: '6px', padding: '8px', color: '#e2e4ed', fontSize: '12px'
+                      }}
+                    />
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      {editingPresetId && (
+                        <button
+                          onClick={() => { setEditingPresetId(null); setNewPresetName(''); setNewPresetContent(''); }}
+                          style={{ flex: 1, backgroundColor: '#333', border: 'none', borderRadius: '8px', padding: '10px', color: '#e2e4ed', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' }}
+                        >
+                          취소
+                        </button>
+                      )}
+                      <button
+                        onClick={handleAddCustomPreset}
+                        style={{
+                          flex: 2, backgroundColor: '#83c5be', border: 'none', borderRadius: '8px', padding: '10px', color: '#11111b', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px'
+                        }}
+                      >
+                        {editingPresetId ? '수정 저장' : '지침 프리셋 등록'}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
 
             {/* colomo.dev 연동 리더기 커스텀 대시보드 */}
-            
+
             {/* 아코디언 1: 테마 설정 */}
             <div style={{ backgroundColor: '#111311', borderRadius: '14px', border: '1px solid #222822', overflow: 'hidden' }}>
-              <div 
+              <div
                 onClick={() => setShowThemeCollapse(!showThemeCollapse)}
                 style={{ padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', borderBottom: showThemeCollapse ? '1px solid #222822' : 'none' }}
               >
@@ -2150,10 +2154,10 @@ function App() {
                 </h4>
                 {showThemeCollapse ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
               </div>
-              
+
               {showThemeCollapse && (
                 <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '13px' }}>
-                  
+
                   {/* 테마 프리셋 UI */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', borderBottom: '1px solid #222822', paddingBottom: '12px', marginBottom: '4px' }}>
                     <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
@@ -2169,7 +2173,7 @@ function App() {
                       ))}
                     </div>
                     <div style={{ display: 'flex', gap: '6px' }}>
-                      <input 
+                      <input
                         type="text" value={newThemePresetName} onChange={(e) => setNewThemePresetName(e.target.value)}
                         placeholder="현재 테마 저장 (이름 입력)"
                         style={{ flex: 1, backgroundColor: '#222822', border: 'none', borderRadius: '6px', padding: '8px', color: '#e2e4ed', fontSize: '12px' }}
@@ -2184,80 +2188,80 @@ function App() {
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '10px' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                       <label style={{ fontSize: '11px', color: '#a5adce' }}>폰트 종류 (css)</label>
-                      <input 
-                        type="text" value={readerSettings.fontFamily} 
+                      <input
+                        type="text" value={readerSettings.fontFamily}
                         onChange={(e) => handleUpdateReaderSetting('fontFamily', e.target.value)}
                         style={{ backgroundColor: '#222822', border: 'none', borderRadius: '6px', padding: '6px', color: '#e2e4ed' }}
                       />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                       <label style={{ fontSize: '11px', color: '#a5adce' }}>글자 색상</label>
-                      <input 
-                        type="text" value={readerSettings.fontColor} 
+                      <input
+                        type="text" value={readerSettings.fontColor}
                         onChange={(e) => handleUpdateReaderSetting('fontColor', e.target.value)}
                         style={{ backgroundColor: '#222822', border: 'none', borderRadius: '6px', padding: '6px', color: '#e2e4ed' }}
                       />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                       <label style={{ fontSize: '11px', color: '#a5adce' }}>배경 색상</label>
-                      <input 
-                        type="text" value={readerSettings.bgColor} 
+                      <input
+                        type="text" value={readerSettings.bgColor}
                         onChange={(e) => handleUpdateReaderSetting('bgColor', e.target.value)}
                         style={{ backgroundColor: '#222822', border: 'none', borderRadius: '6px', padding: '6px', color: '#e2e4ed' }}
                       />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                       <label style={{ fontSize: '11px', color: '#aab0a6' }}>글자 크기 (px)</label>
-                      <input 
-                        type="number" value={readerSettings.fontSize} 
+                      <input
+                        type="number" value={readerSettings.fontSize}
                         onChange={(e) => handleUpdateReaderSetting('fontSize', e.target.value === '' ? '' : (parseInt(e.target.value) || 0))}
                         style={{ backgroundColor: '#222822', border: 'none', borderRadius: '6px', padding: '6px', color: '#e2e4ed' }}
                       />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                       <label style={{ fontSize: '11px', color: '#aab0a6' }}>글자 두께 (weight)</label>
-                      <input 
-                        type="number" step="100" min="100" max="900" value={readerSettings.fontWeight} 
+                      <input
+                        type="number" step="100" min="100" max="900" value={readerSettings.fontWeight}
                         onChange={(e) => handleUpdateReaderSetting('fontWeight', e.target.value === '' ? '' : (parseInt(e.target.value) || 0))}
                         style={{ backgroundColor: '#222822', border: 'none', borderRadius: '6px', padding: '6px', color: '#e2e4ed' }}
                       />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                       <label style={{ fontSize: '11px', color: '#aab0a6' }}>좌우 간격 (px)</label>
-                      <input 
-                        type="number" value={readerSettings.paddingX} 
+                      <input
+                        type="number" value={readerSettings.paddingX}
                         onChange={(e) => handleUpdateReaderSetting('paddingX', e.target.value === '' ? '' : (parseInt(e.target.value) || 0))}
                         style={{ backgroundColor: '#222822', border: 'none', borderRadius: '6px', padding: '6px', color: '#e2e4ed' }}
                       />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                       <label style={{ fontSize: '11px', color: '#aab0a6' }}>줄간격 (line-height)</label>
-                      <input 
-                        type="number" step="0.1" value={readerSettings.lineHeight} 
+                      <input
+                        type="number" step="0.1" value={readerSettings.lineHeight}
                         onChange={(e) => handleUpdateReaderSetting('lineHeight', e.target.value === '' ? '' : (parseFloat(e.target.value) || 0))}
                         style={{ backgroundColor: '#222822', border: 'none', borderRadius: '6px', padding: '6px', color: '#e2e4ed' }}
                       />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                       <label style={{ fontSize: '11px', color: '#aab0a6' }}>문장 간격 (margin, px)</label>
-                      <input 
-                        type="number" value={readerSettings.paragraphGap} 
+                      <input
+                        type="number" value={readerSettings.paragraphGap}
                         onChange={(e) => handleUpdateReaderSetting('paragraphGap', e.target.value === '' ? '' : (parseInt(e.target.value) || 0))}
                         style={{ backgroundColor: '#222822', border: 'none', borderRadius: '6px', padding: '6px', color: '#e2e4ed' }}
                       />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                       <label style={{ fontSize: '11px', color: '#aab0a6' }}>들여쓰기 (em)</label>
-                      <input 
-                        type="number" step="0.5" value={readerSettings.textIndent} 
+                      <input
+                        type="number" step="0.5" value={readerSettings.textIndent}
                         onChange={(e) => handleUpdateReaderSetting('textIndent', e.target.value === '' ? '' : (parseFloat(e.target.value) || 0))}
                         style={{ backgroundColor: '#222822', border: 'none', borderRadius: '6px', padding: '6px', color: '#e2e4ed' }}
                       />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                       <label style={{ fontSize: '11px', color: '#aab0a6' }}>원문 투명도 (0~100 %)</label>
-                      <input 
-                        type="number" min="0" max="100" value={readerSettings.opacity} 
+                      <input
+                        type="number" min="0" max="100" value={readerSettings.opacity}
                         onChange={(e) => {
                           const valStr = e.target.value;
                           if (valStr === '') {
@@ -2279,16 +2283,16 @@ function App() {
                   <div style={{ borderTop: '1px solid #222822', paddingTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span>한자/일본어 병기 유지</span>
-                      <input 
-                        type="checkbox" checked={readerSettings.keepOriginalText} 
+                      <input
+                        type="checkbox" checked={readerSettings.keepOriginalText}
                         onChange={(e) => handleUpdateReaderSetting('keepOriginalText', e.target.checked)}
                         style={{ width: '18px', height: '18px' }}
                       />
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span>사이트 최하단 여백 추가 (스크롤 마진)</span>
-                      <input 
-                        type="checkbox" checked={readerSettings.bottomSpacing} 
+                      <input
+                        type="checkbox" checked={readerSettings.bottomSpacing}
                         onChange={(e) => handleUpdateReaderSetting('bottomSpacing', e.target.checked)}
                         style={{ width: '18px', height: '18px' }}
                       />
@@ -2301,7 +2305,7 @@ function App() {
 
             {/* 아코디언 2: 기타 설정 */}
             <div style={{ backgroundColor: '#121212', borderRadius: '14px', border: '1px solid #252630', overflow: 'hidden' }}>
-              <div 
+              <div
                 onClick={() => setShowMiscCollapse(!showMiscCollapse)}
                 style={{ padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', borderBottom: showMiscCollapse ? '1px solid #252630' : 'none' }}
               >
@@ -2310,45 +2314,45 @@ function App() {
                 </h4>
                 {showMiscCollapse ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
               </div>
-              
+
               {showMiscCollapse && (
                 <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '13px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span>제목 제거</span>
-                    <input 
-                      type="checkbox" checked={readerSettings.removeTitle} 
+                    <input
+                      type="checkbox" checked={readerSettings.removeTitle}
                       onChange={(e) => handleUpdateReaderSetting('removeTitle', e.target.checked)}
                       style={{ width: '18px', height: '18px' }}
                     />
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span>원문의 개행(줄바꿈) 제거</span>
-                    <input 
-                      type="checkbox" checked={readerSettings.removeOriginalNewlines} 
+                    <input
+                      type="checkbox" checked={readerSettings.removeOriginalNewlines}
                       onChange={(e) => handleUpdateReaderSetting('removeOriginalNewlines', e.target.checked)}
                       style={{ width: '18px', height: '18px' }}
                     />
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span>다운로드 시 HTML 잔여 태그 제거</span>
-                    <input 
-                      type="checkbox" checked={readerSettings.removeHtmlOnDownload} 
+                    <input
+                      type="checkbox" checked={readerSettings.removeHtmlOnDownload}
                       onChange={(e) => handleUpdateReaderSetting('removeHtmlOnDownload', e.target.checked)}
                       style={{ width: '18px', height: '18px' }}
                     />
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span>빈 줄 강제 제거</span>
-                    <input 
-                      type="checkbox" checked={readerSettings.removeEmptyLines} 
+                    <input
+                      type="checkbox" checked={readerSettings.removeEmptyLines}
                       onChange={(e) => handleUpdateReaderSetting('removeEmptyLines', e.target.checked)}
                       style={{ width: '18px', height: '18px' }}
                     />
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <span>원문에 구글 번역/발음 부가정보 추가</span>
-                    <input 
-                      type="checkbox" checked={readerSettings.googleTranslate} 
+                    <input
+                      type="checkbox" checked={readerSettings.googleTranslate}
                       onChange={(e) => handleUpdateReaderSetting('googleTranslate', e.target.checked)}
                       style={{ width: '18px', height: '18px' }}
                     />
@@ -2364,7 +2368,7 @@ function App() {
                 <div>보관 소설 수: {cacheStats.totalNovels}개</div>
                 <div>캐시된 화수: {cacheStats.totalCachedEpisodes}개</div>
               </div>
-              <button 
+              <button
                 onClick={handleClearCache}
                 style={{
                   backgroundColor: '#252630', border: 'none', color: '#e78284', borderRadius: '8px', padding: '10px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', marginTop: '4px'
@@ -2380,7 +2384,7 @@ function App() {
               <p style={{ margin: 0, fontSize: '11px', color: '#a5adce', lineHeight: '1.4' }}>
                 도메인이 바뀌어 보관함이 비어 보일 때 사용합니다. 구 도메인 앱에서 백업 파일을 다운로드받은 뒤, 새 도메인 앱에서 불러오기 하세요.
               </p>
-              <button 
+              <button
                 onClick={handleBackupDownload}
                 style={{
                   backgroundColor: '#81c784', border: 'none', color: '#11111b', borderRadius: '8px', padding: '10px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer'
@@ -2388,10 +2392,10 @@ function App() {
               >
                 현재 보관함 전체 백업 파일 다운로드
               </button>
-              
+
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '6px', borderTop: '1px solid #252630', paddingTop: '10px' }}>
                 <label style={{ fontSize: '12px', color: '#a5adce' }}>백업 파일 불러오기 및 복원</label>
-                <input 
+                <input
                   type="file"
                   accept=".json"
                   onChange={handleBackupUpload}

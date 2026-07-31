@@ -22,6 +22,8 @@ def proxy():
         accept_lang = 'ja-JP,ja;q=0.9,en;q=0.8'
     elif any(d in url for d in ['jjwxc', '52shuku', 'qidian', 'zongheng', 'shu']):
         accept_lang = 'zh-CN,zh;q=0.9,en;q=0.8'
+    elif 'sangtacviet' in url:
+        accept_lang = 'vi-VN,vi;q=0.9,zh-CN;q=0.8,en;q=0.7'
     else:
         accept_lang = 'ko-KR,ko;q=0.9,en;q=0.8'
 
@@ -42,6 +44,56 @@ def proxy():
         headers['Referer'] = 'https://www.pixiv.net/'
         # pixiv 로그인 우회를 위한 추가 쿠키 및 설정
         headers['sec-fetch-mode'] = 'navigate'
+    elif 'sangtacviet' in url:
+        headers['Referer'] = 'https://sangtacviet.com/'
+
+    # sangtacviet.com은 비동기 렌더링이 필수이므로 2차 AJAX 호출 브릿지 구현
+    if 'sangtacviet' in url:
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            html_content = response.content.decode('utf-8', errors='replace')
+            
+            # 본문이 비어있을 경우에만 2차 AJAX 호출
+            if 'class="contentbox"' in html_content and '<i>' not in html_content:
+                # URL에서 host, book_id, chapter 파싱 (예: https://sangtacviet.com/truyen/uukanshu/1/2/)
+                match = re.search(r'truyen/([^/]+)/([^/]+)/([^/]+)', url)
+                if match:
+                    host_name = match.group(1)
+                    book_id = match.group(2)
+                    chapter_id = match.group(3)
+                    
+                    # sangtacviet의 전형적인 AJAX 엔드포인트
+                    ajax_url = f"https://sangtacviet.com/index.php?sajax=getchapter&bookid={book_id}&chapter={chapter_id}&host={host_name}&id={book_id}&chap={chapter_id}"
+                    
+                    # GET 방식과 POST 방식 모두 대응 가능하도록 유연하게 GET 요청
+                    ajax_resp = requests.get(ajax_url, headers=headers, timeout=10)
+                    ajax_content = ajax_resp.content.decode('utf-8', errors='replace')
+                    
+                    # JSON 응답일 경우 html 필드 추출, 아니면 원문 그대로 사용
+                    ajax_html = ajax_content
+                    if ajax_content.strip().startswith('{'):
+                        try:
+                            data = json.loads(ajax_content)
+                            ajax_html = data.get('html', data.get('data', ajax_content))
+                        except:
+                            pass
+                            
+                    # 원본 HTML의 contentbox 내부에 AJAX로 가져온 <i> 태그들을 주입
+                    html_content = re.sub(
+                        r'(<div[^>]*class=["\']?[^"\']*contentbox[^"\']*["\']?[^>]*>)',
+                        f'\\1\n{ajax_html}\n',
+                        html_content
+                    )
+            
+            return jsonify({
+                "html": html_content,
+                "status": response.status_code,
+                "url": response.url
+            }), 200
+        except Exception as e:
+            print(f"[Sangtacviet AJAX Bridge Failed] {str(e)}")
+            # 에러 시 일반 프로세스로 폴백하여 진행되게 둠
+            pass
 
     try:
         # 타겟 사이트 소스 긁어오기 (타임아웃 10초)
