@@ -55,12 +55,19 @@ def proxy():
             
             # 본문이 비어있을 경우에만 2차 AJAX 호출
             if 'class="contentbox"' in html_content and '<i>' not in html_content:
-                # URL에서 host, book_id, chapter 파싱 (예: https://sangtacviet.com/truyen/uukanshu/1/2/)
-                match = re.search(r'truyen/([^/]+)/([^/]+)/([^/]+)', url)
+                # URL에서 host, book_id, chapter 파싱 (예: https://sangtacviet.com/truyen/uukanshu/1/2/ 또는 truyen/jjwxc/1/7598053/1/)
+                match = re.search(r'truyen/(.+)', url)
                 if match:
-                    host_name = match.group(1)
-                    book_id = match.group(2)
-                    chapter_id = match.group(3)
+                    path_parts = [p for p in match.group(1).split('/') if p]
+                    host_name = path_parts[0]
+                    # URL 깊이에 상관없이 항상 마지막 두 개가 book_id와 chapter_id임
+                    if len(path_parts) >= 3:
+                        book_id = path_parts[-2]
+                        chapter_id = path_parts[-1]
+                    else:
+                        # 예비 폴백
+                        book_id = path_parts[1]
+                        chapter_id = path_parts[2] if len(path_parts) > 2 else '1'
                     
                     # sangtacviet의 전형적인 AJAX 엔드포인트
                     ajax_url = f"https://sangtacviet.com/index.php?sajax=getchapter&bookid={book_id}&chapter={chapter_id}&host={host_name}&id={book_id}&chap={chapter_id}"
@@ -162,7 +169,7 @@ def report_feedback():
             import datetime
             timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
             
-        file_path = f"feedback/report_{timestamp}.json"
+        file_path = f"feedback/pending/report_{timestamp}.json"
         commit_message = f"bug: report translation feedback for {data.get('url', 'novel')}"
         
         json_content = json.dumps(data, ensure_ascii=False, indent=2)
@@ -191,7 +198,7 @@ def report_feedback():
             is_vercel = os.environ.get('VERCEL') == '1'
             if not is_vercel:
                 try:
-                    local_dir = os.path.join(os.path.dirname(__file__), "..", "feedback")
+                    local_dir = os.path.join(os.path.dirname(__file__), "..", "feedback", "pending")
                     os.makedirs(local_dir, exist_ok=True)
                     with open(os.path.join(local_dir, f"report_{timestamp}.json"), 'w', encoding='utf-8') as f:
                         f.write(json_content)
