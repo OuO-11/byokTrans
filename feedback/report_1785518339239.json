@@ -1,0 +1,26 @@
+{
+  "time": "2026-07-31T17:18:59.221Z",
+  "timestamp": "1785518339239",
+  "url": "https://sangtacviet.com/truyen/jjwxc/1/7598053/1/",
+  "model": "gemini-3.1-flash-lite",
+  "userAgent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/30.0 Chrome/143.0.0.0 Mobile Safari/537.36",
+  "memo": "베트남어 사이트 이렇게 뜸.",
+  "mode": "viewer",
+  "title": "상작비엣 - 새로운 오픈 웹소설 플랫폼 / Sáng Tác Việt - Nền tảng văn học mạng mở mới",
+  "chapter": 1,
+  "paragraphsCount": 3,
+  "paragraphs": [
+    {
+      "original": "帐户 (注意区分大小写字母):",
+      "translated": "계정 (대소문자를 구분하십시오):"
+    },
+    {
+      "original": "没有账号？ 重新输入密码进行注册:",
+      "translated": "계정이 없으신가요? 비밀번호를 다시 입력하여 회원가입하세요:"
+    },
+    {
+      "original": "注意: 设置一个简单的密码可能导致账号被盗",
+      "translated": "주의: 단순한 비밀번호를 설정할 경우 계정이 도용될 위험이 있습니다."
+    }
+  ]
+}
