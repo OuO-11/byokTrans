@@ -2,6 +2,7 @@ import re
 import os
 import json
 import base64
+from urllib.parse import urlparse
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import requests
@@ -16,13 +17,15 @@ def proxy():
     if not url:
         return jsonify({"error": "Missing URL parameter"}), 400
 
-    # 보안 및 차단 우회를 위한 헤더 기획
-    # [36단계] 도메인별 언어 헤더 지능형 분기: 일본 사이트는 ja 우선, 중국 사이트는 zh 우선, 그 외 ko 우선
-    if any(d in url for d in ['pixiv', 'syosetu', 'kakuyomu', 'fanfiction', 'narou']):
+    # 도메인별 언어 헤더 지능형 분기
+    parsed_url = urlparse(url)
+    hostname = parsed_url.hostname or ''
+
+    if any(d in hostname for d in ['pixiv', 'syosetu', 'kakuyomu', 'fanfiction', 'narou']):
         accept_lang = 'ja-JP,ja;q=0.9,en;q=0.8'
-    elif any(d in url for d in ['jjwxc', '52shuku', 'qidian', 'zongheng', 'shu']):
+    elif any(d in hostname for d in ['jjwxc', '52shuku', 'qidian', 'zongheng', 'shu']):
         accept_lang = 'zh-CN,zh;q=0.9,en;q=0.8'
-    elif 'sangtacviet' in url:
+    elif 'sangtacviet.com' in hostname:
         accept_lang = 'vi-VN,vi;q=0.9,zh-CN;q=0.8,en;q=0.7'
     else:
         accept_lang = 'ko-KR,ko;q=0.9,en;q=0.8'
@@ -34,28 +37,28 @@ def proxy():
     }
 
     # 도메인별 Referer 조율 (CORS 우회 및 이미지 로딩 보장)
-    if 'sangtacviet' in url:
-        headers['Referer'] = 'https://sangtacviet.com/'
-    elif 'jjwxc' in url:
+    if 'sangtacviet.com' in hostname:
+        headers['Referer'] = url  # 현재 접속 중인 정확한 URL로 위장하여 방어벽 통과
+    elif 'jjwxc.net' in hostname:
         headers['Referer'] = 'https://www.jjwxc.net/'
-    elif '52shuku' in url:
+    elif '52shuku.net' in hostname:
         headers['Referer'] = 'https://www.52shuku.net/'
-    elif 'archiveofourown' in url or 'ao3' in url:
+    elif 'archiveofourown.org' in hostname or 'ao3' in hostname:
         headers['Referer'] = 'https://archiveofourown.org/'
-    elif 'pixiv' in url:
+    elif 'pixiv.net' in hostname:
         headers['Referer'] = 'https://www.pixiv.net/'
         # pixiv 로그인 우회를 위한 추가 쿠키 및 설정
         headers['sec-fetch-mode'] = 'navigate'
 
-    # sangtacviet.com은 비동기 렌더링이 필수이므로 2차 AJAX 호출 브릿지 구현
-    if 'sangtacviet' in url:
+    # sangtacviet.com 플러그인 로직 (세션 유지 및 비동기 AJAX 연동)
+    if 'sangtacviet.com' in hostname:
         try:
-            response = requests.get(url, headers=headers, timeout=10)
+            session = requests.Session()
+            response = session.get(url, headers=headers, timeout=10)
             html_content = response.content.decode('utf-8', errors='replace')
             
             # 본문이 비어있을 경우에만 2차 AJAX 호출
             if 'class="contentbox"' in html_content and '<i>' not in html_content:
-                # URL에서 host, book_id, chapter 파싱 (예: https://sangtacviet.com/truyen/uukanshu/1/2/ 또는 truyen/jjwxc/1/7598053/1/)
                 match = re.search(r'truyen/(.+)', url)
                 if match:
                     path_parts = [p for p in match.group(1).split('/') if p]
@@ -76,7 +79,8 @@ def proxy():
                     post_headers = headers.copy()
                     post_headers['Content-Type'] = 'application/x-www-form-urlencoded'
                     
-                    ajax_resp = requests.post(ajax_url, headers=post_headers, timeout=10)
+                    # session.post를 사용하여 쿠키 승계
+                    ajax_resp = session.post(ajax_url, headers=post_headers, timeout=10)
                     ajax_content = ajax_resp.content.decode('utf-8', errors='replace')
                     
                     # JSON 응답일 경우 html 필드 추출, 아니면 원문 그대로 사용
@@ -106,7 +110,7 @@ def proxy():
             pass
 
     try:
-        # 타겟 사이트 소스 긁어오기 (타임아웃 10초)
+        # 범용 로직: 타겟 사이트 소스 긁어오기 (타임아웃 10초)
         response = requests.get(url, headers=headers, timeout=10)
         
         # 중국 사이트들의 구식 인코딩(GBK, GB2312) 깨짐 방지 처리

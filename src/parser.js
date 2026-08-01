@@ -158,113 +158,137 @@ export function extractNovelContent(rawHtml, url) {
   let title = doc.querySelector('title')?.textContent?.trim() || '제목 없음';
   let contentHtml = '';
 
-  // 도메인별 소설 본문 영역 파싱 규칙 커스텀 (52shuku, 진강문학성 등)
-  if (url.includes('52shuku')) {
-    const article = doc.querySelector('.article-content') || doc.querySelector('article');
-    if (article) {
-      const targetSelectors = ['.read-page', '.page-link', '.book-page', '.pages', '.ad', '.read-ad'];
-      targetSelectors.forEach(sel => {
-        const els = article.querySelectorAll(sel);
-        els.forEach(el => el.remove());
-      });
-
-      const navElements = article.querySelectorAll('p, div');
-      navElements.forEach(el => {
-        const text = el.textContent?.trim() || '';
-        if (
-          (text.includes('上一页') && text.includes('下一页')) ||
-          (text.includes('이전 페이지') && text.includes('다음 페이지')) ||
-          (text.includes('목차') && text.includes('다음화')) ||
-          (text.includes('目录') && text.includes('下一章'))
-        ) {
-          el.remove();
+  // [65단계] 도메인별 플러그인(모듈화) 파서 레지스트리 구축
+  let hostname = '';
+  try {
+    hostname = new URL(url).hostname;
+  } catch(e) {
+    hostname = url;
+  }
+  
+  const siteParsers = [
+    {
+      match: (host) => host.includes('sangtacviet.com'),
+      extract: (doc, url, prevUrl, nextUrl, indexUrl, title) => {
+        const contentBox = doc.querySelector('.contentbox');
+        if (contentBox) {
+          let r = "";
+          const w = function(n) {
+            n.childNodes.forEach(c => {
+              if (c.nodeType === 1) { // Node.ELEMENT_NODE
+                if (c.tagName === 'I') {
+                  const t = c.getAttribute('t');
+                  if (t) r += t;
+                } else if (c.tagName === 'BR') {
+                  r += "\n";
+                } else if (c.tagName !== 'SCRIPT' && c.tagName !== 'STYLE') {
+                  w(c);
+                }
+              } else if (c.nodeType === 3) { // Node.TEXT_NODE
+                r += c.textContent;
+              }
+            });
+          };
+          w(contentBox);
+          const res = r.trim();
+          const rawLines = res.split('\n');
+          
+          const sangtacvietParagraphs = [];
+          rawLines.forEach(line => {
+            let text = line.trim();
+            // 한자 사이 띄어쓰기 찌꺼기 정제
+            text = text.replace(/([\u4E00-\u9FFF\u3400-\u4DBF])\s+/g, '$1').replace(/\s+([\u4E00-\u9FFF\u3400-\u4DBF])/g, '$1');
+            if (text && text.length >= 2 && !text.startsWith('http') && isNaN(text)) {
+              sangtacvietParagraphs.push(text);
+            }
+          });
+          
+          return {
+            title,
+            paragraphs: sangtacvietParagraphs,
+            prevUrl,
+            nextUrl,
+            indexUrl,
+            sourceLang: 'zh'
+          };
         }
-      });
-
-      contentHtml = article.innerHTML;
-    }
-  } else if (url.includes('jjwxc')) {
-    let contentArea = doc.querySelector('#novelcontent') || 
-                      doc.querySelector('.novelcontent') || 
-                      doc.querySelector('.noveltext') || 
-                      doc.querySelector('#content') ||
-                      doc.querySelector('td.noveltext');
-
-    if (!contentArea && (url.includes('m.jjwxc.net') || url.includes('m.jjwxc'))) {
-      const candidates = doc.querySelectorAll('.b.module, div[class*="module"], .note_main');
-      let longestDiv = null;
-      let maxLen = 0;
-      candidates.forEach(el => {
-        const textLen = el.textContent?.trim().length || 0;
-        if (textLen > maxLen) {
-          maxLen = textLen;
-          longestDiv = el;
+        return null;
+      }
+    },
+    {
+      match: (host) => host.includes('52shuku'),
+      extract: (doc) => {
+        const article = doc.querySelector('.article-content') || doc.querySelector('article');
+        if (article) {
+          const targetSelectors = ['.read-page', '.page-link', '.book-page', '.pages', '.ad', '.read-ad'];
+          targetSelectors.forEach(sel => {
+            const els = article.querySelectorAll(sel);
+            els.forEach(el => el.remove());
+          });
+          const navElements = article.querySelectorAll('p, div');
+          navElements.forEach(el => {
+            const text = el.textContent?.trim() || '';
+            if ((text.includes('上一页') && text.includes('下一页')) || (text.includes('이전 페이지') && text.includes('다음 페이지')) || (text.includes('목차') && text.includes('다음화')) || (text.includes('目录') && text.includes('下一章'))) {
+              el.remove();
+            }
+          });
+          return article.innerHTML;
         }
-      });
-      if (longestDiv && maxLen > 300) {
-        contentArea = longestDiv;
+        return null;
+      }
+    },
+    {
+      match: (host) => host.includes('jjwxc.net') || host.includes('jjwxc.com'),
+      extract: (doc) => {
+        let contentArea = doc.querySelector('#novelcontent') || doc.querySelector('.novelcontent') || doc.querySelector('.noveltext') || doc.querySelector('#content') || doc.querySelector('td.noveltext');
+        if (!contentArea && (hostname.includes('m.jjwxc.net') || hostname.includes('m.jjwxc'))) {
+          const candidates = doc.querySelectorAll('.b.module, div[class*="module"], .note_main');
+          let longestDiv = null;
+          let maxLen = 0;
+          candidates.forEach(el => {
+            const textLen = el.textContent?.trim().length || 0;
+            if (textLen > maxLen) {
+              maxLen = textLen;
+              longestDiv = el;
+            }
+          });
+          if (longestDiv && maxLen > 300) {
+            contentArea = longestDiv;
+          }
+        }
+        if (contentArea) {
+          const navSelects = ['.nav', '.novel_nav', 'a', 'style', 'script', '#comment_list_new', '.recommend_novel_box'];
+          navSelects.forEach(sel => {
+            contentArea.querySelectorAll(sel).forEach(el => el.remove());
+          });
+          return contentArea.innerHTML;
+        }
+        return null;
+      }
+    },
+    {
+      match: (host) => host.includes('archiveofourown.org') || host.includes('ao3'),
+      extract: (doc) => {
+        const chapters = doc.querySelector('#chapters') || doc.querySelector('.userstuff');
+        if (chapters) return chapters.innerHTML;
+        return null;
       }
     }
+  ];
 
-    if (contentArea) {
-      const navSelects = ['.nav', '.novel_nav', 'a', 'style', 'script', '#comment_list_new', '.recommend_novel_box'];
-      navSelects.forEach(sel => {
-        contentArea.querySelectorAll(sel).forEach(el => el.remove());
-      });
-      contentHtml = contentArea.innerHTML;
-    }
-  } else if (url.includes('archiveofourown') || url.includes('ao3')) {
-    const chapters = doc.querySelector('#chapters') || doc.querySelector('.userstuff');
-    if (chapters) {
-      contentHtml = chapters.innerHTML;
-    }
-  } else if (url.includes('sangtacviet')) {
-    const contentBox = doc.querySelector('.contentbox');
-    if (contentBox) {
-      let r = "";
-      const w = function(n) {
-        n.childNodes.forEach(c => {
-          if (c.nodeType === 1) { // Node.ELEMENT_NODE
-            if (c.tagName === 'I') {
-              const t = c.getAttribute('t');
-              if (t) r += t;
-            } else if (c.tagName === 'BR') {
-              r += "\n";
-            } else if (c.tagName !== 'SCRIPT' && c.tagName !== 'STYLE') {
-              w(c);
-            }
-          } else if (c.nodeType === 3) { // Node.TEXT_NODE
-            r += c.textContent;
-          }
-        });
-      };
-      w(contentBox);
-      const res = r.trim();
-      const rawLines = res.split('\n');
-      
-      const sangtacvietParagraphs = [];
-      rawLines.forEach(line => {
-        let text = line.trim();
-        
-        // [중요 알고리즘] 중국어 원문 복원 시 발생하는 띄어쓰기 찌꺼기 정제
-        // 한자는 띄어쓰기를 하지 않는 언어이므로, 불필요한 공백을 제거합니다.
-        // 이때 베트남어 성조 문자나 한국어 등이 훼손되지 않도록 '순수 한자 유니코드' 대역만 정밀 타겟팅합니다.
-        text = text.replace(/([\u4E00-\u9FFF\u3400-\u4DBF])\s+/g, '$1').replace(/\s+([\u4E00-\u9FFF\u3400-\u4DBF])/g, '$1');
-        
-        // 중국어 원문은 짧은 단문일 수 있으므로 2글자 이상으로 필터링 기준 완화
-        if (text && text.length >= 2 && !text.startsWith('http') && isNaN(text)) {
-          sangtacvietParagraphs.push(text);
-        }
-      });
-      
-      return {
-        title,
-        paragraphs: sangtacvietParagraphs,
-        prevUrl,
-        nextUrl,
-        indexUrl,
-        sourceLang: 'zh'
-      };
+  // 플러그인 매칭 실행
+  for (const parserModule of siteParsers) {
+    if (parserModule.match(hostname)) {
+      const result = parserModule.extract(doc, url, prevUrl, nextUrl, indexUrl, title);
+      // 만약 객체가 바로 반환되었다면 (예: sangtacviet) 그대로 리턴
+      if (result && typeof result === 'object' && result.paragraphs) {
+        return result;
+      }
+      // 문자열 HTML이 반환되었다면 (예: 52shuku, jjwxc) contentHtml에 할당
+      if (typeof result === 'string') {
+        contentHtml = result;
+      }
+      break;
     }
   }
 
