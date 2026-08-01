@@ -72,8 +72,17 @@ def proxy():
                         book_id = path_parts[1]
                         chapter_id = path_parts[2] if len(path_parts) > 2 else '1'
                     
-                    # sangtacviet의 최신 AJAX 엔드포인트 (POST 방식, sajax=readchapter)
-                    ajax_url = f"https://sangtacviet.com/index.php?bookid={book_id}&h={host_name}&c={chapter_id}&ngmar=readc&sajax=readchapter&sty=1&exts="
+                    # sangtacviet의 최신 AJAX 엔드포인트 (POST 방식으로 데이터 전송)
+                    ajax_url = "https://sangtacviet.com/index.php"
+                    payload = {
+                        "bookid": book_id,
+                        "h": host_name,
+                        "c": chapter_id,
+                        "ngmar": "readc",
+                        "sajax": "readchapter",
+                        "sty": "1",
+                        "exts": ""
+                    }
                     
                     # sangtacviet 방어벽 핵심: 자바스크립트로 구워지는 쿠키(_gac, _ac 등)를 세션에 수동으로 심어주어야 함
                     cookies_to_set = {}
@@ -86,9 +95,10 @@ def proxy():
                     # POST 방식으로 데이터 요청 (sangtacviet은 Content-type이 x-www-form-urlencoded여야 함)
                     post_headers = headers.copy()
                     post_headers['Content-Type'] = 'application/x-www-form-urlencoded'
+                    post_headers['X-Requested-With'] = 'XMLHttpRequest'  # 봇 차단(4002 에러) 방지를 위한 AJAX 식별 헤더
                     
-                    # session.post를 사용하여 쿠키 승계
-                    ajax_resp = session.post(ajax_url, headers=post_headers, timeout=10)
+                    # session.post를 사용하여 쿠키 승계 및 payload를 form-data로 전송
+                    ajax_resp = session.post(ajax_url, data=payload, headers=post_headers, timeout=10)
                     ajax_content = ajax_resp.content.decode('utf-8', errors='replace')
                     
                     # JSON 응답일 경우 html 필드 추출, 아니면 원문 그대로 사용
