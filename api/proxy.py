@@ -34,7 +34,9 @@ def proxy():
     }
 
     # 도메인별 Referer 조율 (CORS 우회 및 이미지 로딩 보장)
-    if 'jjwxc' in url:
+    if 'sangtacviet' in url:
+        headers['Referer'] = 'https://sangtacviet.com/'
+    elif 'jjwxc' in url:
         headers['Referer'] = 'https://www.jjwxc.net/'
     elif '52shuku' in url:
         headers['Referer'] = 'https://www.52shuku.net/'
@@ -44,8 +46,6 @@ def proxy():
         headers['Referer'] = 'https://www.pixiv.net/'
         # pixiv 로그인 우회를 위한 추가 쿠키 및 설정
         headers['sec-fetch-mode'] = 'navigate'
-    elif 'sangtacviet' in url:
-        headers['Referer'] = 'https://sangtacviet.com/'
 
     # sangtacviet.com은 비동기 렌더링이 필수이므로 2차 AJAX 호출 브릿지 구현
     if 'sangtacviet' in url:
@@ -69,11 +69,14 @@ def proxy():
                         book_id = path_parts[1]
                         chapter_id = path_parts[2] if len(path_parts) > 2 else '1'
                     
-                    # sangtacviet의 전형적인 AJAX 엔드포인트
-                    ajax_url = f"https://sangtacviet.com/index.php?sajax=getchapter&bookid={book_id}&chapter={chapter_id}&host={host_name}&id={book_id}&chap={chapter_id}"
+                    # sangtacviet의 최신 AJAX 엔드포인트 (POST 방식, sajax=readchapter)
+                    ajax_url = f"https://sangtacviet.com/index.php?bookid={book_id}&h={host_name}&c={chapter_id}&ngmar=readc&sajax=readchapter&sty=1&exts="
                     
-                    # GET 방식과 POST 방식 모두 대응 가능하도록 유연하게 GET 요청
-                    ajax_resp = requests.get(ajax_url, headers=headers, timeout=10)
+                    # POST 방식으로 데이터 요청 (sangtacviet은 Content-type이 x-www-form-urlencoded여야 함)
+                    post_headers = headers.copy()
+                    post_headers['Content-Type'] = 'application/x-www-form-urlencoded'
+                    
+                    ajax_resp = requests.post(ajax_url, headers=post_headers, timeout=10)
                     ajax_content = ajax_resp.content.decode('utf-8', errors='replace')
                     
                     # JSON 응답일 경우 html 필드 추출, 아니면 원문 그대로 사용
@@ -81,7 +84,7 @@ def proxy():
                     if ajax_content.strip().startswith('{'):
                         try:
                             data = json.loads(ajax_content)
-                            ajax_html = data.get('html', data.get('data', ajax_content))
+                            ajax_html = data.get('data', data.get('html', ajax_content))
                         except:
                             pass
                             
