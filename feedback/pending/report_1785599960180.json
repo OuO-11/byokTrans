@@ -1,0 +1,22 @@
+{
+  "time": "2026-08-01T15:59:20.175Z",
+  "timestamp": "1785599960180",
+  "url": "https://sangtacviet.com/truyen/jjwxc/1/7598053/1/",
+  "model": "gemini-3.1-flash-lite",
+  "userAgent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/30.0 Chrome/143.0.0.0 Mobile Safari/537.36",
+  "memo": "",
+  "mode": "viewer",
+  "title": "상작비엣 - 새로운 오픈형 웹소설 플랫폼 / Sáng Tác Việt - Nền tảng văn học mạng mở mới",
+  "chapter": 1,
+  "paragraphsCount": 2,
+  "paragraphs": [
+    {
+      "original": "{\"code\":\"5\",\"err\":\"Lỗi không xác định, vui lòng thử lại sau, mã báo lỗi:4002.\"}",
+      "translated": "오류 코드: 5, 에러: 알 수 없는 오류가 발생했습니다. 잠시 후 다시 시도해 주세요. 오류 코드: 4002."
+    },
+    {
+      "original": "Đọc trên web để có chất lượng dịch cao và ủng hộ website.",
+      "translated": "웹사이트에서 읽으시면 더 높은 품질의 번역을 감상하실 수 있으며, 사이트 운영에 큰 도움이 됩니다."
+    }
+  ]
+}
