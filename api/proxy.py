@@ -75,6 +75,14 @@ def proxy():
                     # sangtacviet의 최신 AJAX 엔드포인트 (POST 방식, sajax=readchapter)
                     ajax_url = f"https://sangtacviet.com/index.php?bookid={book_id}&h={host_name}&c={chapter_id}&ngmar=readc&sajax=readchapter&sty=1&exts="
                     
+                    # sangtacviet 방어벽 핵심: 자바스크립트로 구워지는 쿠키(_gac, _ac 등)를 세션에 수동으로 심어주어야 함
+                    cookies_to_set = {}
+                    for match in re.finditer(r'document\.cookie\s*=\s*["\']([^=]+)=([^;"\']+)', html_content):
+                        cookies_to_set[match.group(1)] = match.group(2)
+                    
+                    if cookies_to_set:
+                        session.cookies.update(cookies_to_set)
+                    
                     # POST 방식으로 데이터 요청 (sangtacviet은 Content-type이 x-www-form-urlencoded여야 함)
                     post_headers = headers.copy()
                     post_headers['Content-Type'] = 'application/x-www-form-urlencoded'
