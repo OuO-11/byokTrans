@@ -1,0 +1,22 @@
+{
+  "time": "2026-08-01T04:23:44.589Z",
+  "timestamp": "1785558224593",
+  "url": "https://sangtacviet.com/truyen/jjwxc/1/7598053/1/",
+  "model": "gemini-3.1-flash-lite",
+  "userAgent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/30.0 Chrome/143.0.0.0 Mobile Safari/537.36",
+  "memo": "",
+  "mode": "viewer",
+  "title": "상작비엣 - 새로운 오픈 웹소설 플랫폼 / Sáng Tác Việt - Nền tảng văn học mạng mở mới",
+  "chapter": 1,
+  "paragraphsCount": 2,
+  "paragraphs": [
+    {
+      "original": "{\"code\": 7,\"time\": 1000}",
+      "translated": "{\"code\": 7,\"time\": 1000}"
+    },
+    {
+      "original": "Đọc trên web để có chất lượng dịch cao và ủng hộ website.",
+      "translated": "웹에서 읽으면 더 높은 품질의 번역을 감상하실 수 있으며, 웹사이트 운영에 큰 힘이 됩니다."
+    }
+  ]
+}
