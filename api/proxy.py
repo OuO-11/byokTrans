@@ -30,10 +30,17 @@ def proxy():
     else:
         accept_lang = 'ko-KR,ko;q=0.9,en;q=0.8'
 
+    # [73단계] Vercel IP Rate Limit (Code 7) 우회를 위한 클라이언트 IP 전달
+    client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+    if client_ip and ',' in client_ip:
+        client_ip = client_ip.split(',')[0].strip()
+        
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'User-Agent': request.headers.get('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36'),
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-        'Accept-Language': accept_lang,
+        'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+        'X-Forwarded-For': client_ip,  # 상작비엣 서버가 Vercel IP 대신 실제 사용자 IP를 보게 만듦
+        'Client-IP': client_ip         # 혹시 모를 대비용
     }
 
     # 도메인별 Referer 조율 (CORS 우회 및 이미지 로딩 보장)
