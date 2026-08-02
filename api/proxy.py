@@ -90,15 +90,17 @@ def proxy():
                     
                     # 진짜 JS 코드와 동일하게 POST 방식으로 복구 및 Content-Type 주입
                     ajax_headers['Content-Type'] = 'application/x-www-form-urlencoded'
-                    # X-Requested-With는 JS 코드에 없었으므로 봇 의심을 피하기 위해 넣지 않음
+                    ajax_headers['X-Requested-With'] = 'XMLHttpRequest'
                     ajax_headers['Accept'] = '*/*'
                     ajax_headers['Origin'] = 'https://sangtacviet.com'
                     ajax_headers['Sec-Fetch-Dest'] = 'empty'
                     ajax_headers['Sec-Fetch-Mode'] = 'cors'
                     ajax_headers['Sec-Fetch-Site'] = 'same-origin'
                     
-                    # data="" 를 주입하여 빈 POST 본문(Content-Length: 0)을 명시적으로 전송
-                    ajax_resp = session.post(ajax_url, headers=ajax_headers, data="", timeout=10)
+                    # [71단계] 브라우저 디버깅 결과 4002 에러의 진짜 원인 발견!
+                    # 본문 요청 시 payload(데이터)가 완전히 비어있으면 서버가 봇으로 간주함.
+                    # 브라우저는 실제 JS에서 'rescan=true&k=' 라는 값을 전송하고 있었음.
+                    ajax_resp = session.post(ajax_url, headers=ajax_headers, data="rescan=true&k=", timeout=10)
                     ajax_content = ajax_resp.content.decode('utf-8', errors='replace')
                     
                     # JSON 응답일 경우 html 필드 추출, 아니면 원문 그대로 사용
@@ -107,13 +109,7 @@ def proxy():
                         try:
                             error_json = json.loads(ajax_content)
                             if error_json.get('code') != 0:
-                                debug_info = {
-                                    'request_headers': dict(ajax_resp.request.headers),
-                                    'request_url': str(ajax_resp.request.url),
-                                    'request_body': str(ajax_resp.request.body) if ajax_resp.request.body else "",
-                                    'initial_cookies': dict(session.cookies)
-                                }
-                                return jsonify({'error': f'Sangtacviet 봇 차단 발생: {ajax_content}', 'debug_info': debug_info}), 403
+                                return jsonify({'error': f'Sangtacviet 봇 차단 발생 (AJAX 호출 실패): {ajax_content}'}), 403
                         except:
                             pass
                             
