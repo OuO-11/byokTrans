@@ -57,8 +57,8 @@ def proxy():
             response = session.get(url, headers=headers, timeout=10)
             html_content = response.content.decode('utf-8', errors='replace')
             
-            # 본문이 비어있을 경우(<i> 태그만 덩그러니 있을 경우)에만 2차 AJAX 호출
-            if 'class="contentbox"' in html_content and '<i>' in html_content:
+            # 본문이 비어있을 경우(<i> 태그가 전혀 없는 빈 껍데기일 경우)에만 2차 AJAX 호출
+            if 'class="contentbox"' in html_content and '<i>' not in html_content:
                 match = re.search(r'truyen/(.+)', url)
                 if match:
                     path_parts = [p for p in match.group(1).split('/') if p]
