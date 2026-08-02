@@ -83,18 +83,22 @@ def proxy():
                     if cookies_to_set:
                         session.cookies.update(cookies_to_set)
                     
-                    # [69단계] 실제 브라우저 통신에 맞게 GET 방식으로 변경하고 불필요한 헤더(Content-Type 등) 제거
+                    # [70단계] 사용자가 접속한 '실제 화수 주소'를 Referer로 완벽히 위장
+                    # 기존에는 목차 주소(.../1/bookid/)를 고정으로 넣어서 WAF에 봇으로 적발됨
+                    headers['Referer'] = url
                     ajax_headers = headers.copy()
                     
-                    # 브라우저 표준 AJAX 헤더 정규화 삽입 (실제 통신과 동일하게 맞춤)
+                    # 진짜 JS 코드와 동일하게 POST 방식으로 복구 및 Content-Type 주입
+                    ajax_headers['Content-Type'] = 'application/x-www-form-urlencoded'
+                    # X-Requested-With는 JS 코드에 없었으므로 봇 의심을 피하기 위해 넣지 않음
                     ajax_headers['Accept'] = '*/*'
                     ajax_headers['Origin'] = 'https://sangtacviet.com'
                     ajax_headers['Sec-Fetch-Dest'] = 'empty'
                     ajax_headers['Sec-Fetch-Mode'] = 'cors'
                     ajax_headers['Sec-Fetch-Site'] = 'same-origin'
                     
-                    # WAF 방어벽이 '빈 POST 본문'을 봇으로 차단하므로(4002 에러), 실제 브라우저와 똑같이 GET 방식을 사용
-                    ajax_resp = session.get(ajax_url, headers=ajax_headers, timeout=10)
+                    # data="" 를 주입하여 빈 POST 본문(Content-Length: 0)을 명시적으로 전송
+                    ajax_resp = session.post(ajax_url, headers=ajax_headers, data="", timeout=10)
                     ajax_content = ajax_resp.content.decode('utf-8', errors='replace')
                     
                     # JSON 응답일 경우 html 필드 추출, 아니면 원문 그대로 사용
