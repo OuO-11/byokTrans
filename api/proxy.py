@@ -86,10 +86,26 @@ def proxy():
                     # POST 방식으로 데이터 요청 (sangtacviet은 Content-type이 x-www-form-urlencoded여야 함)
                     post_headers = headers.copy()
                     post_headers['Content-Type'] = 'application/x-www-form-urlencoded'
-                    post_headers['X-Requested-With'] = 'XMLHttpRequest'  # 봇 차단(4002, 4009 에러) 방지를 위한 AJAX 식별 헤더
+                    post_headers['X-Requested-With'] = 'XMLHttpRequest'  # 봇 차단(4002, 4009 에러) 방지
+                    post_headers['Accept'] = '*/*'
+                    post_headers['Origin'] = 'https://sangtacviet.com'
+                    post_headers['Sec-Fetch-Dest'] = 'empty'
+                    post_headers['Sec-Fetch-Mode'] = 'cors'
+                    post_headers['Sec-Fetch-Site'] = 'same-origin'
                     
-                    # session.post를 사용하여 쿠키 승계 및 AJAX 쿼리 전송 (데이터는 URL에 포함)
-                    ajax_resp = session.post(ajax_url, headers=post_headers, timeout=10)
+                    # [67단계] 파라미터를 URL(ajax_url)과 Body(payload) 모두에 배치하여 서버의 $_GET / $_POST 둘 다 만족시킴
+                    payload = {
+                        "bookid": book_id,
+                        "h": host_name,
+                        "c": chapter_id,
+                        "ngmar": "readc",
+                        "sajax": "readchapter",
+                        "sty": "1",
+                        "exts": ""
+                    }
+                    
+                    # session.post를 사용하여 쿠키 승계 및 AJAX 쿼리 이중 페이로드 전송
+                    ajax_resp = session.post(ajax_url, data=payload, headers=post_headers, timeout=10)
                     ajax_content = ajax_resp.content.decode('utf-8', errors='replace')
                     
                     # JSON 응답일 경우 html 필드 추출, 아니면 원문 그대로 사용
