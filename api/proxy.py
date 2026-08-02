@@ -109,8 +109,8 @@ def proxy():
                             if error_json.get('code') != 0:
                                 debug_info = {
                                     'request_headers': dict(ajax_resp.request.headers),
-                                    'request_url': ajax_resp.request.url,
-                                    'request_body': ajax_resp.request.body,
+                                    'request_url': str(ajax_resp.request.url),
+                                    'request_body': str(ajax_resp.request.body) if ajax_resp.request.body else "",
                                     'initial_cookies': dict(session.cookies)
                                 }
                                 return jsonify({'error': f'Sangtacviet 봇 차단 발생: {ajax_content}', 'debug_info': debug_info}), 403
