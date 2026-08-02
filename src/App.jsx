@@ -1207,15 +1207,24 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
             episodesStore.put(episode);
           });
 
-          transaction.oncomplete = () => resolve(true);
+          transaction.oncomplete = () => {
+            // localStorage 데이터 복원 (영혼 보내기)
+            if (backupData.localSettings) {
+              const ls = backupData.localSettings;
+              if (ls.api_keys) localStorage.setItem('noveltrans_api_keys', ls.api_keys);
+              if (ls.active_key_idx) localStorage.setItem('noveltrans_active_key_idx', ls.active_key_idx);
+              if (ls.cached_models) localStorage.setItem('noveltrans_cached_models', ls.cached_models);
+              if (ls.base_prompts) localStorage.setItem('noveltrans_base_prompts', ls.base_prompts);
+              if (ls.reader_settings) localStorage.setItem('noveltrans_reader_settings', ls.reader_settings);
+              if (ls.theme_presets) localStorage.setItem('noveltrans_theme_presets', ls.theme_presets);
+            }
+            resolve(true);
+          };
           transaction.onerror = (err) => reject(err);
         });
 
-        alert('보관함 파일 복원이 성공적으로 완료되었습니다!');
-
-        const list = await getNovels();
-        setNovels(list);
-        getCacheStatistics().then(setCacheStats);
+        alert('보관함 및 모든 설정(API 키, 프롬프트 등)이 성공적으로 복원되었습니다!\\n적용을 위해 앱을 새로고침합니다.');
+        window.location.reload();
       } catch (err) {
         alert('복원에 실패했습니다. 정상적인 백업 파일인지 확인해 주세요: ' + err.message);
       } finally {

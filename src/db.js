@@ -213,9 +213,20 @@ export async function exportAllData() {
     const episodesReq = episodesStore.getAll();
 
     transaction.oncomplete = () => {
+      // localStorage 데이터 캡슐화 (영혼 보내기)
+      const localSettings = {
+        api_keys: localStorage.getItem('noveltrans_api_keys') || '',
+        active_key_idx: localStorage.getItem('noveltrans_active_key_idx') || '0',
+        cached_models: localStorage.getItem('noveltrans_cached_models') || '',
+        base_prompts: localStorage.getItem('noveltrans_base_prompts') || '',
+        reader_settings: localStorage.getItem('noveltrans_reader_settings') || '',
+        theme_presets: localStorage.getItem('noveltrans_theme_presets') || ''
+      };
+
       const backupData = {
         novels: novelsReq.result,
         episodes: episodesReq.result,
+        localSettings: localSettings,
         exportedAt: Date.now()
       };
       const jsonStr = JSON.stringify(backupData);

@@ -1,0 +1,10 @@
+{
+  "appId": "com.byoktrans.app",
+  "appName": "ByokTrans",
+  "webDir": "dist",
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  }
+}
