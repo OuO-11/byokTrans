@@ -331,25 +331,10 @@ export function extractNovelContent(rawHtml, url) {
   const rawText = cleanDoc.body?.textContent || '';
   const lines = rawText.split('\n');
 
-  // jjwxc 및 52shuku 꼬리말/작가의 말/댓글 영역 전역 블랙리스트 키워드들
-  // (본문 중 정상적으로 출현할 수 있는 'Top'이나 '目录' 같은 단어는 단어 블랙리스트에서 제외)
-  const BLACKLIST_KEYWORDS = [
-    '哦豁', '52书库', '传送门：', '排行榜单', '书库不错的',
-    '试试作家助手好不好用', '作者有话说', '显示所有文의作话', 
-    '第1章', '昵称：', '评分：', '鲜花一捧', '交流灌水', 
-    '别字提虫', '一块小砖', '别字', '灌水', '发表',
-    '支持手机版', '晋江文学城', 'jjwxc', '本站', '作话',
-    '小说在线阅读', '本章未完', '点击下一页', '无广告'
-  ];
-
   lines.forEach(line => {
     const text = line.trim();
-    // [39단계] 텍스트가 존재하고, 최소 4글자 이상이며, URL이나 숫자가 아닐 때만 수집 (2차 필터링)
-    if (text && text.length >= 4 && !text.startsWith('http') && isNaN(text)) {
-      // 블랙리스트 키워드 매칭 감시
-      const isBlacklisted = BLACKLIST_KEYWORDS.some(keyword => text.includes(keyword));
-      if (isBlacklisted) return;
-      
+    // [39단계] 텍스트가 존재하고, 최소 2글자 이상이며, URL이나 숫자가 아닐 때만 수집 (2차 필터링)
+    if (text && text.length >= 2 && !text.startsWith('http') && isNaN(text)) {
       paragraphsList.push(text);
     }
   });

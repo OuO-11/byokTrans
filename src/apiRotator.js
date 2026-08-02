@@ -162,8 +162,8 @@ export async function translateTextWithRotation(textToTranslate, systemInstructi
 
       const responseData = await response.json();
 
-      // [57단계] 할당량 초과(429) 또는 인증 오류(400/403) 발생 시 키 로테이션 후 재시도
-      if (response.status === 429 || (responseData.error && (
+      // [57단계] 할당량 초과(429), 서버 에러(500대), 또는 인증 오류(403) 발생 시 키 로테이션 후 재시도
+      if (response.status === 429 || response.status >= 500 || (responseData.error && (
         responseData.error.status === 'RESOURCE_EXHAUSTED' || 
         responseData.error.message.includes('API key') ||
         responseData.error.message.includes('Quota exceeded')
@@ -174,12 +174,17 @@ export async function translateTextWithRotation(textToTranslate, systemInstructi
         continue; // 다음 루프로 넘어가 새 키로 재시도
       }
 
-      // 2. 기타 모델 404 에러 등 (예: gemini-3.1-flash-lite 모델 미존재 시)
+      // 2. 모델 404 에러 등 (예: gemini-3.1-flash-lite 모델 미존재 시)
       if (response.status === 404) {
-        throw new Error(`모델을 찾을 수 없습니다 (${model}). 지원되지 않는 모델이거나 단종된 세대입니다.`);
+        throw new Error(`[NON_RETRIABLE] 모델을 찾을 수 없습니다 (${model}).`);
       }
 
-      // 3. 일반 오류 처리
+      // 2-1. 400 에러 (Safety / Prohibited Content) 등은 재시도해도 똑같으므로 즉시 중단 (API 증발 방지)
+      if (response.status === 400 || (responseData.error && responseData.error.message.includes('PROHIBITED'))) {
+        throw new Error(`[NON_RETRIABLE_SAFETY] 구글 안전망 필터에 의해 번역 차단됨: ${responseData.error?.message}`);
+      }
+
+      // 3. 기타 일반 오류 처리
       if (!response.ok || responseData.error) {
         throw new Error(responseData.error?.message || `HTTP error! status: ${response.status}`);
       }
@@ -187,20 +192,29 @@ export async function translateTextWithRotation(textToTranslate, systemInstructi
       // 4. 번역 결과 반환
       const translatedText = responseData.candidates?.[0]?.content?.parts?.[0]?.text;
       if (!translatedText) {
-        throw new Error('API 응답에서 번역 텍스트를 추출하지 못했습니다.');
+        throw new Error(`[NON_RETRIABLE_SAFETY] API 응답에 텍스트가 없습니다. (Safety 검열로 인한 차단 가능성)`);
       }
 
       return translatedText;
 
     } catch (e) {
       if (e.message === '사용자에 의해 번역이 강제 중단되었습니다.') throw e;
-      console.warn(`[Gemini API Request Error] ${e.message}`);
-      rotateApiKey();
-      attempts++;
+      if (e.message.includes('[NON_RETRIABLE') || e.message.includes('[NON_RETRIABLE_SAFETY]')) {
+        throw e; // 치명적/안전망 오류는 재시도 없이 즉시 상위로 던져서 무한루프 방지
+      }
+      
+      if (e.message.includes('[RETRYABLE]')) {
+        console.warn(`[Gemini API Error] ${e.message}. Rotating key...`);
+        rotateApiKey();
+        attempts++;
+        continue;
+      }
+      
+      console.error(`[Gemini API Request Error] ${e.message}`);
+      throw e; // 그 외 오류는 즉시 중단
     }
   }
 
-  // [57단계] 모든 키 소진 시 명시적인 에러 메시지(ALL_KEYS_EXHAUSTED) 반환
   throw new Error('ALL_KEYS_EXHAUSTED');
 }
 
@@ -286,26 +300,27 @@ export async function translateTextStreamWithRotation(textToTranslate, systemIns
         signal: abortSignal
       });
 
-      if (response.status === 429) {
-        console.warn(`[Gemini API Stream Rate Limit] Rotating key...`);
-        rotateApiKey();
-        attempts++;
-        continue;
-      }
-
-      if (response.status === 404) {
-        throw new Error(`모델을 찾을 수 없습니다 (${model}).`);
-      }
-
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
-        // [57단계] 스트리밍에서도 429 에러 명시적 감지 추가 (RESOURCE_EXHAUSTED가 아닐 때도 로테이션)
-        if (response.status === 429 || errData.error?.message?.includes('API key') || errData.error?.status === 'RESOURCE_EXHAUSTED') {
+        
+        // [57단계] 스트리밍에서도 429 에러 또는 서버 에러 500대 감지 시 로테이션
+        if (response.status === 429 || response.status >= 500 || errData.error?.message?.includes('API key') || errData.error?.status === 'RESOURCE_EXHAUSTED') {
+          console.warn(`[Gemini API Stream Rate Limit] Rotating key...`);
           rotateApiKey();
           attempts++;
           continue;
         }
-        throw new Error(errData.error?.message || `HTTP error! status: ${response.status}`);
+        
+        if (response.status === 404) {
+          throw new Error(`[NON_RETRIABLE] 모델을 찾을 수 없습니다 (${model}).`);
+        }
+
+        // 400 에러 (Safety 등) 즉시 상위로 방출
+        if (response.status === 400 || (errData.error && errData.error.message?.includes('PROHIBITED'))) {
+          throw new Error(`[NON_RETRIABLE_SAFETY] 구글 안전망 필터에 의해 번역 차단됨: ${errData.error?.message}`);
+        }
+
+        throw new Error(`[NON_RETRIABLE] HTTP error! status: ${response.status}`);
       }
 
       const reader = response.body.getReader();
