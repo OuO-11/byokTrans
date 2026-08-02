@@ -698,6 +698,7 @@ function App() {
 
     try {
       setTransProgress(20);
+      const res = await fetch(`/api/proxy?url=${encodeURIComponent(targetUrl)}`);
       let data;
       try {
         data = await res.json();
