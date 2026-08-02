@@ -93,19 +93,10 @@ def proxy():
                     post_headers['Sec-Fetch-Mode'] = 'cors'
                     post_headers['Sec-Fetch-Site'] = 'same-origin'
                     
-                    # [67단계] 파라미터를 URL(ajax_url)과 Body(payload) 모두에 배치하여 서버의 $_GET / $_POST 둘 다 만족시킴
-                    payload = {
-                        "bookid": book_id,
-                        "h": host_name,
-                        "c": chapter_id,
-                        "ngmar": "readc",
-                        "sajax": "readchapter",
-                        "sty": "1",
-                        "exts": ""
-                    }
+                    # [67단계 롤백] 서버가 POST Body 데이터가 있을 경우 충돌(4009 에러)을 일으키므로, payload를 제거하고 오직 URL 쿼리(ajax_url)로만 파라미터를 전송함
                     
-                    # session.post를 사용하여 쿠키 승계 및 AJAX 쿼리 이중 페이로드 전송
-                    ajax_resp = session.post(ajax_url, data=payload, headers=post_headers, timeout=10)
+                    # session.post를 사용하여 쿠키 승계 및 AJAX 쿼리 전송 (데이터는 오직 URL에 포함)
+                    ajax_resp = session.post(ajax_url, headers=post_headers, timeout=10)
                     ajax_content = ajax_resp.content.decode('utf-8', errors='replace')
                     
                     # JSON 응답일 경우 html 필드 추출, 아니면 원문 그대로 사용
