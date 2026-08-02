@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Capacitor } from '@capacitor/core';
+import { fetchNativeDirect } from './nativeProxy';
 import { BookOpen, Settings, FolderHeart, Star, Trash2, Plus, Download, RefreshCw, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react';
 import { openDB, saveNovel, getNovels, deleteNovel, saveEpisode, getEpisode, clearOldEpisodes, getCacheStatistics, exportAllData, importAllData, deleteEpisodes } from './db.js';
 import { getApiKeys, saveApiKeys, getActiveApiKey, fetchAvailableModels, translateTextWithRotation, translateTextStreamWithRotation } from './apiRotator.js';
@@ -673,16 +675,20 @@ function App() {
 
     try {
       setTransProgress(20);
-      const res = await fetch(`/api/proxy?url=${encodeURIComponent(targetUrl)}`);
       let data;
-      try {
-        data = await res.json();
-      } catch (e) {
-        if (!res.ok) throw new Error('서버 통신 실패 (상태 코드: ' + res.status + ')');
-      }
-      
-      if (!res.ok && !data?.error) {
-        throw new Error('서버 통신 실패 (상태 코드: ' + res.status + ')');
+      if (Capacitor.isNativePlatform()) {
+        data = await fetchNativeDirect(targetUrl);
+      } else {
+        const res = await fetch(`/api/proxy?url=${encodeURIComponent(targetUrl)}`);
+        try {
+          data = await res.json();
+        } catch (e) {
+          if (!res.ok) throw new Error('서버 통신 실패 (상태 코드: ' + res.status + ')');
+        }
+        
+        if (!res.ok && !data?.error) {
+          throw new Error('서버 통신 실패 (상태 코드: ' + res.status + ')');
+        }
       }
 
       if (data?.error) throw new Error(data.error);
@@ -978,10 +984,16 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
 
     try {
       setTransProgress(20);
-      const res = await fetch(`/api/proxy?url=${encodeURIComponent(targetUrl)}`);
-      if (!res.ok) throw new Error('CORS 프록시 서버 통신 실패');
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
+      let data;
+      if (Capacitor.isNativePlatform()) {
+        data = await fetchNativeDirect(targetUrl);
+      } else {
+        const res = await fetch(`/api/proxy?url=${encodeURIComponent(targetUrl)}`);
+        if (!res.ok) throw new Error('CORS 프록시 서버 통신 실패');
+        data = await res.json();
+      }
+      
+      if (data?.error) throw new Error(data.error);
 
       const activeSubPrompt = filterActiveGlossary(rawSubPrompt, data.html);
       const finalSystemPrompt = activeSubPrompt
