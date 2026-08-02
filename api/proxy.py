@@ -83,20 +83,18 @@ def proxy():
                     if cookies_to_set:
                         session.cookies.update(cookies_to_set)
                     
-                    # POST 방식으로 데이터 요청 (sangtacviet은 Content-type이 x-www-form-urlencoded여야 함)
-                    post_headers = headers.copy()
-                    post_headers['Content-Type'] = 'application/x-www-form-urlencoded'
-                    post_headers['X-Requested-With'] = 'XMLHttpRequest'  # 봇 차단(4002, 4009 에러) 방지
-                    post_headers['Accept'] = '*/*'
-                    post_headers['Origin'] = 'https://sangtacviet.com'
-                    post_headers['Sec-Fetch-Dest'] = 'empty'
-                    post_headers['Sec-Fetch-Mode'] = 'cors'
-                    post_headers['Sec-Fetch-Site'] = 'same-origin'
+                    # [69단계] 실제 브라우저 통신에 맞게 GET 방식으로 변경하고 불필요한 헤더(Content-Type 등) 제거
+                    ajax_headers = headers.copy()
                     
-                    # [67단계 롤백] 서버가 POST Body 데이터가 있을 경우 충돌(4009 에러)을 일으키므로, payload를 제거하고 오직 URL 쿼리(ajax_url)로만 파라미터를 전송함
+                    # 브라우저 표준 AJAX 헤더 정규화 삽입 (실제 통신과 동일하게 맞춤)
+                    ajax_headers['Accept'] = '*/*'
+                    ajax_headers['Origin'] = 'https://sangtacviet.com'
+                    ajax_headers['Sec-Fetch-Dest'] = 'empty'
+                    ajax_headers['Sec-Fetch-Mode'] = 'cors'
+                    ajax_headers['Sec-Fetch-Site'] = 'same-origin'
                     
-                    # session.post를 사용하여 쿠키 승계 및 AJAX 쿼리 전송 (데이터는 오직 URL에 포함)
-                    ajax_resp = session.post(ajax_url, headers=post_headers, timeout=10)
+                    # WAF 방어벽이 '빈 POST 본문'을 봇으로 차단하므로(4002 에러), 실제 브라우저와 똑같이 GET 방식을 사용
+                    ajax_resp = session.get(ajax_url, headers=ajax_headers, timeout=10)
                     ajax_content = ajax_resp.content.decode('utf-8', errors='replace')
                     
                     # JSON 응답일 경우 html 필드 추출, 아니면 원문 그대로 사용
