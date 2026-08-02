@@ -72,8 +72,8 @@ def proxy():
                         book_id = path_parts[1]
                         chapter_id = path_parts[2] if len(path_parts) > 2 else '1'
                     
-                    # [변경] URL 쿼리 스트링 복구: 서버(PHP)가 파라미터를 $_GET으로 받으므로 URL에 붙여야 함.
-                    ajax_url = f"https://sangtacviet.com/index.php?bookid={book_id}&h={host_name}&c={chapter_id}&ngmar=readc&sajax=readchapter&sty=1&exts="
+                    # [변경] URL 쿼리 스트링 복구: 실제 JS에서는 exts= 가 붙지 않는 경우가 많으므로 정확히 일치시킴
+                    ajax_url = f"https://sangtacviet.com/index.php?bookid={book_id}&h={host_name}&c={chapter_id}&ngmar=readc&sajax=readchapter&sty=1"
                     
                     # sangtacviet 방어벽 핵심: 자바스크립트로 구워지는 쿠키(_gac, _ac 등)를 세션에 수동으로 심어주어야 함
                     cookies_to_set = {}
@@ -84,13 +84,13 @@ def proxy():
                         session.cookies.update(cookies_to_set)
                     
                     # [70단계 보완] 실제 접속하여 리다이렉션까지 끝마친 최종 URL을 Referer로 사용
-                    # (사용자가 입력한 URL에 후행 슬래시(/)가 없어서 WAF가 불일치로 차단할 가능성 원천 봉쇄)
                     headers['Referer'] = response.url
                     ajax_headers = headers.copy()
                     
                     # 진짜 JS 코드와 동일하게 POST 방식으로 복구 및 Content-Type 주입
                     ajax_headers['Content-Type'] = 'application/x-www-form-urlencoded'
-                    ajax_headers['X-Requested-With'] = 'XMLHttpRequest'
+                    # [71단계 수정] JS 코드에 하드코딩된 대소문자(XmlHttpRequest)를 정확히 일치시켜 WAF 우회
+                    ajax_headers['X-Requested-With'] = 'XmlHttpRequest'
                     ajax_headers['Accept'] = '*/*'
                     ajax_headers['Origin'] = 'https://sangtacviet.com'
                     ajax_headers['Sec-Fetch-Dest'] = 'empty'

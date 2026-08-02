@@ -698,10 +698,18 @@ function App() {
 
     try {
       setTransProgress(20);
-      const res = await fetch(`/api/proxy?url=${encodeURIComponent(targetUrl)}`);
-      if (!res.ok) throw new Error('CORS 프록시 서버 통신 실패');
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
+      let data;
+      try {
+        data = await res.json();
+      } catch (e) {
+        if (!res.ok) throw new Error('서버 통신 실패 (상태 코드: ' + res.status + ')');
+      }
+      
+      if (!res.ok && !data?.error) {
+        throw new Error('서버 통신 실패 (상태 코드: ' + res.status + ')');
+      }
+
+      if (data?.error) throw new Error(data.error);
 
       const tempTitle = data.html.match(/<title>(.*?)<\/title>/i)?.[1] || '번역된 소설';
       const siteName = targetUrl.includes('sangtacviet') ? 'sangtacviet' : targetUrl.includes('52shuku') ? '52shuku' : targetUrl.includes('jjwxc') ? '진강문학성' : targetUrl.includes('ao3') ? 'AO3' : '기타';
