@@ -36,14 +36,24 @@ export async function downloadCachedEpisodes(novelId, novelTitle, site) {
 
       episodes.forEach(ep => {
         mergedText += `[제 ${ep.chapter}화]\n\n`;
-        mergedText += `--- [한글 번역본] ---\n`;
-        mergedText += `${ep.translatedText}\n\n`;
         
-        // 원문 대조용 데이터가 존재하는 경우 함께 기입
-        if (ep.originalText) {
-          mergedText += `--- [원본 대조] ---\n`;
-          mergedText += `${ep.originalText}\n\n`;
+        let pairs = [];
+        try {
+          const parsed = JSON.parse(ep.translatedText);
+          if (parsed.length > 0 && typeof parsed[0] === 'object' && 'translated' in parsed[0]) {
+            pairs = parsed;
+          } else {
+            const orig = ep.originalText ? JSON.parse(ep.originalText) : [];
+            pairs = parsed.map((t, i) => ({ translated: t, original: orig[i] || '' }));
+          }
+        } catch(e) {
+          pairs = [{ translated: ep.translatedText, original: ep.originalText || '' }];
         }
+
+        pairs.forEach(pair => {
+          if (pair.original) mergedText += `${pair.original}\n`;
+          if (pair.translated) mergedText += `${pair.translated}\n\n`;
+        });
         
         mergedText += `\n==================================================\n\n`;
       });

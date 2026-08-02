@@ -218,38 +218,11 @@ function App() {
   const pageCacheRef = useRef({});
 
   useEffect(() => {
-    // 50단계/53단계: 단순 탭 진입 시 pushState 하는 기존 로직 폐기 (triggerTranslationFlow 내부에서 더 정밀하게 처리함)
+    // 50단계/53단계: 단순 탭 진입 시 상태 연동
     if (activeTab === 'translate' || activeTab === 'viewer' || activeTab === 'pageResult') {
       setLastTranslateSubTab(activeTab);
     }
   }, [activeTab]);
-
-  useEffect(() => {
-    const handlePopState = (e) => {
-      // 뒤로가기 발생 시 무조건 진행 중인 번역 강제 취소
-      cancelTranslationRef.current = true;
-      translationAbortControllerRef.current?.abort();
-
-      if (e.state && e.state.isAppInternal) {
-        // 53단계 핵심: 진짜 히스토리 복원 (과거 URL로 백그라운드 재번역/캐시로드 트리거)
-        const { url, mode, chapter } = e.state;
-        setInputUrl(url);
-        setTransMode(mode);
-        // 항상 최신 렌더링의 함수를 호출하여 Closure Stale 방지
-        if (mode === 'viewer') {
-          if (startViewerTranslationRef.current) startViewerTranslationRef.current(url, chapter, false, true);
-        } else {
-          if (startPageTranslationRef.current) startPageTranslationRef.current(url, false, true);
-        }
-      } else {
-        // 히스토리 스택 최하단(초기 진입점)이라면 메인 탭으로 복귀
-        setActiveTab('translate');
-      }
-    };
-
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
 
   // 뷰어 및 렌더링 상태
   const [viewerTitle, setViewerTitle] = useState('');
@@ -672,7 +645,9 @@ function App() {
     }
   };
 
-  const startViewerTranslation = async (targetUrl, forceChapter = null, bypassCache = false, fromPopState = false) => {
+  // 뷰어 모드(본문 리더기) 전용 번역 함수
+  const startViewerTranslation = async (targetUrl, forceChapter = null, bypassCache = false) => {
+    setTransMode('viewer');
     const activeKey = getActiveApiKey();
     if (!activeKey) {
       alert('API Key를 먼저 설정에서 1개 이상 등록해 주세요.');
@@ -777,20 +752,27 @@ function App() {
 
       const cached = bypassCache ? null : await getEpisode(novelId, chapterToUse);
       if (cached) {
-        const parsedLines = JSON.parse(cached.translatedText);
-        const origLines = JSON.parse(cached.originalText || '[]');
-        const formatted = parsedLines.map((t, i) => ({ translated: t, original: origLines[i] || '' }));
-        if (!fromPopState) {
-          window.history.pushState({ isAppInternal: true, url: targetUrl, mode: 'viewer', chapter: chapterToUse }, '', window.location.pathname);
+        let parsedLines = [];
+        try {
+          parsedLines = JSON.parse(cached.translatedText);
+        } catch(e) {}
+        
+        let formatted = [];
+        // 새로운 Pair 객체 배열인지 레거시 문자열 배열인지 구분
+        if (parsedLines.length > 0 && typeof parsedLines[0] === 'object' && parsedLines[0] !== null && 'translated' in parsedLines[0]) {
+          formatted = parsedLines;
+        } else {
+          // 레거시 지원 (배열 2개 찢어져있던 방식)
+          const origLines = cached.originalText ? JSON.parse(cached.originalText) : [];
+          formatted = parsedLines.map((t, i) => ({ translated: t, original: origLines[i] || '' }));
         }
+
         setViewerParagraphs(formatted);
         setTransProgress(100);
         setActiveTab('viewer');
       } else {
         const initialViewerLines = paragraphs.map(p => ({ original: p, translated: 'AI 번역 대기 중...' }));
-        if (!fromPopState) {
-          window.history.pushState({ isAppInternal: true, url: targetUrl, mode: 'viewer', chapter: chapterToUse }, '', window.location.pathname);
-        }
+        
         setViewerParagraphs(initialViewerLines);
         setActiveTab('viewer');
 
@@ -939,10 +921,13 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
           });
         });
 
-        const successCount = translatedList.filter(t => t && t.length > 0).length;
+        const successCount = translatedList.filter(t => t && t.length > 0 && t !== 'AI 번역 대기 중...' && t !== 'AI 번역 가동 중...').length;
         if (successCount >= paragraphs.length * 0.8) {
-          const cleanTranslatedText = translatedList.map((t, idx) => t || `${paragraphs[idx]} (번역 실패/미완료)`);
-          await saveEpisode(novelId, chapterToUse, JSON.stringify(cleanTranslatedText), JSON.stringify(paragraphs));
+          const pairList = paragraphs.map((orig, idx) => ({
+            original: orig,
+            translated: translatedList[idx] || `${orig} (번역 실패/미완료)`
+          }));
+          await saveEpisode(novelId, chapterToUse, JSON.stringify(pairList), "");
         } else {
           console.warn(`[Cache Aborted] Translation success rate too low (${successCount}/${paragraphs.length}). Not saving to DB.`);
         }
@@ -986,9 +971,6 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
       setTransProgress(100);
       setIsTranslating(false);
       setIframeKey(prev => prev + 1);
-      if (!fromPopState) {
-        window.history.pushState({ isAppInternal: true, url: targetUrl, mode: 'page', chapter: null }, '', window.location.pathname);
-      }
       setNovelHtmlResult(pageCacheRef.current[targetUrl]);
       setActiveTab('pageResult');
       return;
@@ -1010,9 +992,6 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
       setTransProgress(5);
 
       setIframeKey(prev => prev + 1);
-      if (!fromPopState) {
-        window.history.pushState({ isAppInternal: true, url: targetUrl, mode: 'page', chapter: null }, '', window.location.pathname);
-      }
       setNovelHtmlResult(data.html);
       setActiveTab('pageResult');
     } catch (err) {
@@ -1035,9 +1014,9 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
     setActiveViewerChapter(detectedChapter);
 
     if (finalMode === 'viewer') {
-      startViewerTranslation(inputUrl, detectedChapter, true, false);
+      startViewerTranslation(inputUrl, detectedChapter, true);
     } else {
-      startPageTranslation(inputUrl, true, false);
+      startPageTranslation(inputUrl, true);
     }
   };
 
@@ -1673,7 +1652,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                   onClick={() => {
                     setLastTranslateSubTab('translate');
                     setActiveTab('translate');
-                    window.history.pushState({ isAppInternal: true, mode: 'translate' }, '', window.location.pathname);
+                    setActiveTab('translate');
                   }}
                   style={{ background: '#181c18', border: 'none', color: '#81c784', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}
                 >
@@ -1701,7 +1680,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                 {!isTranslating && (
                   <button
                     onClick={() => {
-                      startViewerTranslation(inputUrl, activeViewerChapter, true, false);
+                      startViewerTranslation(inputUrl, activeViewerChapter, true);
                     }}
                     style={{
                       background: 'linear-gradient(135deg, #81c784, #83c5be)',
@@ -1899,7 +1878,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
               {!isTranslating && novelHtmlResult && (
                 <div style={{ display: 'flex', gap: '6px', marginLeft: 'auto' }}>
                   <button
-                    onClick={() => startPageTranslation(inputUrl, true, false)}
+                    onClick={() => startPageTranslation(inputUrl, true)}
                     style={{ background: '#222822', border: '1px solid #81c784', color: '#81c784', padding: '3px 8px', borderRadius: '5px', cursor: 'pointer', fontSize: '11px', whiteSpace: 'nowrap' }}
                   >
                     재번역
