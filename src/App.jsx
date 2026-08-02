@@ -701,7 +701,13 @@ function App() {
       const res = await fetch(`/api/proxy?url=${encodeURIComponent(targetUrl)}`);
       if (!res.ok) throw new Error('CORS 프록시 서버 통신 실패');
       const data = await res.json();
-      if (data.error) throw new Error(data.error);
+      if (data.error) {
+        let errMsg = data.error;
+        if (data.debug_info) {
+          errMsg += '\n\n[DEBUG INFO]\n' + JSON.stringify(data.debug_info, null, 2);
+        }
+        throw new Error(errMsg);
+      }
 
       const tempTitle = data.html.match(/<title>(.*?)<\/title>/i)?.[1] || '번역된 소설';
       const siteName = targetUrl.includes('sangtacviet') ? 'sangtacviet' : targetUrl.includes('52shuku') ? '52shuku' : targetUrl.includes('jjwxc') ? '진강문학성' : targetUrl.includes('ao3') ? 'AO3' : '기타';

@@ -83,9 +83,9 @@ def proxy():
                     if cookies_to_set:
                         session.cookies.update(cookies_to_set)
                     
-                    # [70단계] 사용자가 접속한 '실제 화수 주소'를 Referer로 완벽히 위장
-                    # 기존에는 목차 주소(.../1/bookid/)를 고정으로 넣어서 WAF에 봇으로 적발됨
-                    headers['Referer'] = url
+                    # [70단계 보완] 실제 접속하여 리다이렉션까지 끝마친 최종 URL을 Referer로 사용
+                    # (사용자가 입력한 URL에 후행 슬래시(/)가 없어서 WAF가 불일치로 차단할 가능성 원천 봉쇄)
+                    headers['Referer'] = response.url
                     ajax_headers = headers.copy()
                     
                     # 진짜 JS 코드와 동일하게 POST 방식으로 복구 및 Content-Type 주입
@@ -102,6 +102,22 @@ def proxy():
                     ajax_content = ajax_resp.content.decode('utf-8', errors='replace')
                     
                     # JSON 응답일 경우 html 필드 추출, 아니면 원문 그대로 사용
+                    if '{"code":' in ajax_content:
+                        # JSON 형태의 차단 메시지일 경우
+                        try:
+                            error_json = json.loads(ajax_content)
+                            if error_json.get('code') != 0:
+                                debug_info = {
+                                    'request_headers': dict(ajax_resp.request.headers),
+                                    'request_url': ajax_resp.request.url,
+                                    'request_body': ajax_resp.request.body,
+                                    'initial_cookies': dict(session.cookies)
+                                }
+                                return jsonify({'error': f'Sangtacviet 봇 차단 발생: {ajax_content}', 'debug_info': debug_info}), 403
+                        except:
+                            pass
+                            
+                    # 원본 HTML의 contentbox 내부에 AJAX로 가져온 <i> 태그들을 주입
                     ajax_html = ajax_content
                     if ajax_content.strip().startswith('{'):
                         try:
