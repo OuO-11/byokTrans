@@ -44,6 +44,9 @@ jobs:
           cp android-java/WebViewFetchPlugin.java "$JAVA_DIR/"
           cp android-java/MainActivity.java "$JAVA_DIR/"
 
+      - name: Grant Execute Permission for Gradlew
+        run: chmod +x android/gradlew
+
       - name: Decode Android Release Keystore
         run: |
           echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/app/release.keystore

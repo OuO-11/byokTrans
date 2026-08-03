@@ -19,7 +19,7 @@ export async function downloadCachedEpisodes(novelId, novelTitle, site) {
     const index = store.index('novelId');
     const request = index.getAll(IDBKeyRange.only(novelId));
 
-    request.onsuccess = () => {
+    request.onsuccess = async () => {
       const episodes = request.result;
 
       if (!episodes || episodes.length === 0) {
