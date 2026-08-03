@@ -5,3 +5,4 @@ test_proxy.py
 *.log
 .system_generated/
 .agents/
+*.keystore

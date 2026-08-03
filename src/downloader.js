@@ -1,4 +1,7 @@
 import { openDB } from './db.js';
+import { Capacitor } from '@capacitor/core';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
 
 /**
  * IndexedDB에 캐싱되어 있는 특정 소설의 에피소드들을 읽어와서 
@@ -58,28 +61,47 @@ export async function downloadCachedEpisodes(novelId, novelTitle, site) {
         mergedText += `\n==================================================\n\n`;
       });
 
-      // 3. Blob 객체를 생성하여 파일 다운로드 트리거
+      // 3. 파일 다운로드 (플랫폼 분기 처리)
       try {
-        const blob = new Blob([mergedText], { type: 'text/plain;charset=utf-8' });
-        const fileUrl = URL.createObjectURL(blob);
-        
-        // 파일명 세팅 예시: [52shuku] 소설제목_1화_to_50화.txt
+        // 파일명 생성: [사이트명] 접두사 제거
         const startEp = episodes[0].chapter;
         const endEp = episodes[episodes.length - 1].chapter;
-        const safeTitle = novelTitle.replace(/[\/\\?%*:|"<>\s]/g, '_'); // 파일명 금지문자 치환
-        const fileName = `[${site}] ${safeTitle}_${startEp}화_to_${endEp}화.txt`;
+        const safeTitle = novelTitle.replace(/[\\/\\\\?%*:|"<>\s]/g, '_');
+        const fileName = `${safeTitle}_${startEp}화_to_${endEp}화.txt`;
 
-        const tempLink = document.createElement('a');
-        tempLink.href = fileUrl;
-        tempLink.download = fileName;
-        document.body.appendChild(tempLink);
-        tempLink.click();
-        
-        // 클릭 완료 후 리소스 해제
-        document.body.removeChild(tempLink);
-        URL.revokeObjectURL(fileUrl);
-        
-        resolve(fileName);
+        if (Capacitor.isNativePlatform()) {
+          // [네이티브 앱 환경 (Android/iOS)]
+          const result = await Filesystem.writeFile({
+            path: fileName,
+            data: mergedText,
+            directory: Directory.Cache,
+            encoding: 'utf8'
+          });
+
+          // Share 시트를 띄워 사용자가 '다운로드' 폴더 등에 명시적으로 저장할 수 있게 유도
+          await Share.share({
+            title: fileName,
+            url: result.uri,
+            dialogTitle: '파일 저장하기'
+          });
+          
+          resolve(fileName);
+        } else {
+          // [웹 브라우저 (PWA) 환경]
+          const blob = new Blob([mergedText], { type: 'text/plain;charset=utf-8' });
+          const fileUrl = URL.createObjectURL(blob);
+          
+          const tempLink = document.createElement('a');
+          tempLink.href = fileUrl;
+          tempLink.download = fileName;
+          document.body.appendChild(tempLink);
+          tempLink.click();
+          
+          document.body.removeChild(tempLink);
+          URL.revokeObjectURL(fileUrl);
+          
+          resolve(fileName);
+        }
       } catch (err) {
         reject(new Error('파일 생성 중 에러가 발생했습니다: ' + err.message));
       }

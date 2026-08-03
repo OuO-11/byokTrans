@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Capacitor } from '@capacitor/core';
+import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Share } from '@capacitor/share';
 import { fetchNativeDirect } from './nativeProxy';
-import { BookOpen, Settings, FolderHeart, Star, Trash2, Plus, Download, RefreshCw, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react';
+import { BookOpen, Settings, FolderHeart, Star, Trash2, Plus, Download, RefreshCw, ChevronDown, ChevronUp, AlertTriangle, Sun, Moon } from 'lucide-react';
 import { openDB, saveNovel, getNovels, deleteNovel, saveEpisode, getEpisode, clearOldEpisodes, getCacheStatistics, exportAllData, importAllData, deleteEpisodes } from './db.js';
 import { getApiKeys, saveApiKeys, getActiveApiKey, fetchAvailableModels, translateTextWithRotation, translateTextStreamWithRotation } from './apiRotator.js';
 import { getPromptsTree, savePreset, deletePreset, getPromptContent } from './promptManager.js';
@@ -137,6 +139,11 @@ function App() {
   const [showMiscCollapse, setShowMiscCollapse] = useState(true);
   const [showBasePromptCollapse, setShowBasePromptCollapse] = useState(true);
   const [showPresetPromptCollapse, setShowPresetPromptCollapse] = useState(true);
+
+  // 전역 앱 테마 상태 (웹페이지 iframe 동기화용)
+  const [appTheme, setAppTheme] = useState(() => {
+    return localStorage.getItem('noveltrans_app_theme') || 'dark';
+  });
 
   // 데이터 이전 및 iframe 리프레시 상태 변수
   const [importText, setImportText] = useState('');
@@ -833,7 +840,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
               fullAiTextBuffer = chunk;
 
               // [45단계 핵심] 콜로모 엔진식 정밀 태그(ID) 추출 방식 (정규식 찌꺼기 삭제 방지)
-              const matches = [...fullAiTextBuffer.matchAll(/<p id="(\d+)">([\s\S]*?)<\/p>/g)];
+              const matches = [...fullAiTextBuffer.matchAll(/<p id="(\d+)">([\s\S]*?)(?:<\/p>|$)/g)];
               let maxProcessedIndex = -1;
 
               matches.forEach(match => {
@@ -1003,8 +1010,15 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
       setPageSystemPrompt(finalSystemPrompt);
       setTransProgress(5);
 
+      // 테마 CSS 강제 주입
+      const themeCss = appTheme === 'dark' 
+        ? `<style>body { background-color: #121310 !important; color: #e2e4e0 !important; } a { color: #81c784 !important; }</style>`
+        : `<style>body { background-color: #ffffff !important; color: #111111 !important; } a { color: #4285f4 !important; }</style>`;
+      
+      const themeInjectedHtml = data.html.replace('<head>', `<head>${themeCss}<meta name="color-scheme" content="${appTheme}">`);
+
       setIframeKey(prev => prev + 1);
-      setNovelHtmlResult(data.html);
+      setNovelHtmlResult(themeInjectedHtml);
       setActiveTab('pageResult');
     } catch (err) {
       if (cancelTranslationRef.current || err.name === 'AbortError') {
@@ -1154,21 +1168,35 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
       const base64Str = await exportAllData();
       const jsonStr = decodeURIComponent(escape(atob(base64Str)));
 
-      const blob = new Blob([jsonStr], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-
       const now = new Date();
       const dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');
-      link.download = `byoktrans_backup_${dateStr}.json`;
+      const fileName = `byoktrans_backup_${dateStr}.json`;
 
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      if (Capacitor.isNativePlatform()) {
+        const result = await Filesystem.writeFile({
+          path: fileName,
+          data: jsonStr,
+          directory: Directory.Cache,
+          encoding: 'utf8'
+        });
+        await Share.share({
+          title: fileName,
+          url: result.uri,
+          dialogTitle: '백업 파일 저장하기'
+        });
+      } else {
+        const blob = new Blob([jsonStr], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      }
 
-      alert('보관함 백업 파일이 다운로드 폴더에 성공적으로 저장되었습니다.');
+      alert('보관함 백업 파일 저장이 완료되었습니다.');
     } catch (err) {
       alert('백업 파일 생성에 실패했습니다: ' + err.message);
     }
@@ -1365,6 +1393,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
         <header style={{
           display: 'flex',
           alignItems: 'center',
+          justifyContent: 'space-between',
           padding: '16px 20px',
           borderBottom: '1px solid #242824',
           backgroundColor: '#0e100e',
@@ -1387,6 +1416,29 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
               Byok<span style={{ color: '#81c784' }}>Trans</span>
             </span>
           </div>
+          
+          {/* 다크/라이트 테마 토글 버튼 */}
+          <button
+            onClick={() => {
+              const newTheme = appTheme === 'dark' ? 'light' : 'dark';
+              setAppTheme(newTheme);
+              localStorage.setItem('noveltrans_app_theme', newTheme);
+            }}
+            style={{
+              background: '#181c18',
+              border: '1px solid #242824',
+              borderRadius: '8px',
+              padding: '8px',
+              color: '#81c784',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}
+            title="앱 테마 토글"
+          >
+            {appTheme === 'dark' ? <Moon size={18} /> : <Sun size={18} />}
+          </button>
         </header>
       )}
 
@@ -1941,7 +1993,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
               <h4 style={{ margin: 0, fontSize: '14px', color: '#babbf1' }}>🔑 API & AI 모델 세팅</h4>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: '#a5adce' }}>구글 API Key 목록 (줄바꿈 구분)</label>
+                <label style={{ fontSize: '12px', color: '#a5adce' }}>구글 API Key 목록 (엔터로 구분)</label>
                 <textarea
                   rows={2}
                   value={apiKeysInput}
@@ -2472,7 +2524,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
         {[
           { id: 'library', label: '보관함', icon: FolderHeart },
           { id: 'translate', label: '실시간번역', icon: BookOpen },
-          { id: 'presets', label: '번역 설정', icon: Star }
+          { id: 'presets', label: '번역 설정', icon: Settings }
         ].map(tab => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id || (tab.id === 'translate' && (activeTab === 'viewer' || activeTab === 'pageResult'));

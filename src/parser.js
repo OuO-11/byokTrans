@@ -334,7 +334,9 @@ export function extractNovelContent(rawHtml, url) {
   lines.forEach(line => {
     const text = line.trim();
     // [39단계] 텍스트가 존재하고, 최소 2글자 이상이며, URL이나 숫자가 아닐 때만 수집 (2차 필터링)
-    if (text && text.length >= 2 && !text.startsWith('http') && isNaN(text)) {
+    // + [추가] 52shuku 및 특정 사이트 고유 노이즈 제거 (번역 전 원문 찌꺼기 핀포인트 필터링)
+    const isNoise = text.includes('52书库不错') || text.includes('传送门') || text.toLowerCase() === 'top' || text.toLowerCase() === 'top\\ntop';
+    if (text && text.length >= 2 && !text.startsWith('http') && isNaN(text) && !isNoise) {
       paragraphsList.push(text);
     }
   });
