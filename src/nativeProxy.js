@@ -1,5 +1,5 @@
 import { CapacitorHttp } from '@capacitor/core';
-import { Browser } from '@capacitor/browser';
+import { WebViewFetch } from './plugins/WebViewFetchPlugin.js';
 
 /**
  * GET 응답 헤더에서 Set-Cookie 값을 파싱하여 Cookie 헤더용 문자열로 반환합니다.
@@ -24,95 +24,13 @@ function parseSetCookieHeaders(headers) {
 }
 
 /**
- * [77단계] Sangtacviet 전용: WebView DOM 추출
- * Browser.open으로 실제 WebView에서 페이지를 렌더링하여
- * gotox() JS가 자동 실행된 후 .contentbox innerHTML을 추출한다.
- *
- * @capacitor/browser의 evaluateJavaScript는 Android v6 기준 제한적이므로,
- * 동작 시 innerHTML을 반환하고, 미지원 시 명확한 에러를 반환한다.
- *
- * @param {string} url 챕터 URL
- * @returns {{ html: string, status: number, url: string } | { error: string }}
- */
-async function fetchSangtacvietViaWebView(url) {
-  return new Promise(async (resolve) => {
-    let settled = false;
-    let listener = null;
-
-    const finish = (result) => {
-      if (settled) return;
-      settled = true;
-      if (listener) {
-        listener.remove();
-        listener = null;
-      }
-      Browser.close().catch(() => {});
-      resolve(result);
-    };
-
-    // 전체 타임아웃 30초
-    const timeout = setTimeout(() => {
-      finish({ error: 'Sangtacviet WebView 타임아웃 (30초 초과)' });
-    }, 30000);
-
-    try {
-      // 페이지 로드 완료 이벤트 리스너 등록
-      listener = await Browser.addListener('browserPageLoaded', async () => {
-        // gotox() 실행 완료까지 2초 대기
-        await new Promise(r => setTimeout(r, 2000));
-
-        try {
-          // evaluateJavaScript로 .contentbox innerHTML 추출
-          const result = await Browser.evaluateJavaScript({
-            javascript: `
-              (function() {
-                var box = document.querySelector('.contentbox');
-                if (!box) return JSON.stringify({ error: 'contentbox not found' });
-                return JSON.stringify({ html: document.documentElement.outerHTML });
-              })()
-            `
-          });
-
-          // result.value는 JSON 문자열
-          let parsed;
-          try {
-            parsed = JSON.parse(result?.value ?? result);
-          } catch (e) {
-            parsed = { error: 'JSON parse 실패: ' + String(result?.value ?? result) };
-          }
-
-          if (parsed.error) {
-            finish({ error: 'Sangtacviet WebView DOM 추출 실패: ' + parsed.error });
-          } else {
-            clearTimeout(timeout);
-            finish({ html: parsed.html, status: 200, url });
-          }
-        } catch (evalErr) {
-          // evaluateJavaScript 미지원 → 옵션 A(커스텀 플러그인)로 전환 필요
-          finish({
-            error:
-              'evaluateJavaScript 미지원 (옵션 A 커스텀 플러그인 전환 필요): ' +
-              evalErr.message
-          });
-        }
-      });
-
-      // WebView 열기 (사용자에게 잠깐 보일 수 있음 — 로딩 스피너로 덮기)
-      await Browser.open({ url, presentationStyle: 'popover' });
-    } catch (openErr) {
-      finish({ error: 'Browser.open 실패: ' + openErr.message });
-    }
-  });
-}
-
-/**
  * 네이티브 앱(APK) 전용 통신 모듈 (CORS 제약 없음)
  * 기존 파이썬(proxy.py)이 Vercel 서버에서 하던 헤더 조작, 세션 유지,
  * POST AJAX 호출(상작비엣 본문 로딩)을 기기 자체에서 직접 수행합니다.
  */
 export async function fetchNativeDirect(url) {
   const hostname = new URL(url).hostname;
-  
+
   let acceptLang = 'ko-KR,ko;q=0.9,en;q=0.8';
   if (['pixiv', 'syosetu', 'kakuyomu', 'fanfiction', 'narou'].some(d => hostname.includes(d))) {
     acceptLang = 'ja-JP,ja;q=0.9,en;q=0.8';
@@ -146,11 +64,15 @@ export async function fetchNativeDirect(url) {
 
   try {
     if (hostname.includes('sangtacviet.com')) {
-      // [77단계] WebView DOM 추출 방식
-      // CapacitorHttp는 JS를 실행하지 못해 gotox() 봇 차단(code:7)을 피할 수 없음.
-      // Browser.open으로 실제 WebView에서 페이지를 렌더링하고,
-      // gotox() 자동 실행 완료 후 .contentbox innerHTML을 evaluateJavaScript로 추출한다.
-      return await fetchSangtacvietViaWebView(url);
+      // [77단계] 커스텀 WebViewFetch 플러그인으로 DOM 추출
+      // Android WebView에서 gotox() JS를 실제 실행하고 outerHTML을 반환한다.
+      // waitMs=2000: gotox() 완료까지 2초 대기 후 evaluateJavascript() 호출
+      try {
+        const result = await WebViewFetch.fetchHtml({ url, waitMs: 2000 });
+        return { html: result.html, status: 200, url };
+      } catch (webViewErr) {
+        return { error: 'Sangtacviet WebView 추출 실패: ' + webViewErr.message };
+      }
     }
 
     // 일반 사이트 프로세스
@@ -160,7 +82,7 @@ export async function fetchNativeDirect(url) {
       headers: headers,
       responseType: 'text'
     });
-    
+
     return { html: res.data, status: res.status, url: res.url || url };
 
   } catch (error) {

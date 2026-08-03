@@ -37,6 +37,13 @@ jobs:
           npx cap add android || true
           npx cap sync android
 
+      - name: Inject Custom Android Plugin
+        run: |
+          JAVA_DIR="android/app/src/main/java/com/byoktrans/app"
+          mkdir -p "$JAVA_DIR"
+          cp android-java/WebViewFetchPlugin.java "$JAVA_DIR/"
+          cp android-java/MainActivity.java "$JAVA_DIR/"
+
       - name: Build APK (Assemble Debug)
         working-directory: android
         run: ./gradlew assembleDebug
