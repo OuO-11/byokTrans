@@ -1,4 +1,109 @@
 import { CapacitorHttp } from '@capacitor/core';
+import { Browser } from '@capacitor/browser';
+
+/**
+ * GET 응답 헤더에서 Set-Cookie 값을 파싱하여 Cookie 헤더용 문자열로 반환합니다.
+ * CapacitorHttp는 쿠키를 자동으로 다음 요청에 유지하지 않으므로, 직접 파싱하여 주입해야 합니다.
+ * @param {object} headers CapacitorHttp 응답의 headers 객체
+ * @returns {string} "name1=val1; name2=val2" 형태의 Cookie 문자열
+ */
+function parseSetCookieHeaders(headers) {
+  const rawCookie = headers['set-cookie'] || headers['Set-Cookie'] || '';
+  if (!rawCookie) return '';
+  // 배열로 오는 경우와 단일 문자열인 경우 모두 처리
+  const entries = Array.isArray(rawCookie) ? rawCookie : [rawCookie];
+  const result = [];
+  entries.forEach(entry => {
+    // 'name=value; Path=/; HttpOnly' 형식에서 'name=value' 부분만 추출
+    const nameVal = entry.split(';')[0].trim();
+    if (nameVal && nameVal.includes('=')) {
+      result.push(nameVal);
+    }
+  });
+  return result.join('; ');
+}
+
+/**
+ * [77단계] Sangtacviet 전용: WebView DOM 추출
+ * Browser.open으로 실제 WebView에서 페이지를 렌더링하여
+ * gotox() JS가 자동 실행된 후 .contentbox innerHTML을 추출한다.
+ *
+ * @capacitor/browser의 evaluateJavaScript는 Android v6 기준 제한적이므로,
+ * 동작 시 innerHTML을 반환하고, 미지원 시 명확한 에러를 반환한다.
+ *
+ * @param {string} url 챕터 URL
+ * @returns {{ html: string, status: number, url: string } | { error: string }}
+ */
+async function fetchSangtacvietViaWebView(url) {
+  return new Promise(async (resolve) => {
+    let settled = false;
+    let listener = null;
+
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      if (listener) {
+        listener.remove();
+        listener = null;
+      }
+      Browser.close().catch(() => {});
+      resolve(result);
+    };
+
+    // 전체 타임아웃 30초
+    const timeout = setTimeout(() => {
+      finish({ error: 'Sangtacviet WebView 타임아웃 (30초 초과)' });
+    }, 30000);
+
+    try {
+      // 페이지 로드 완료 이벤트 리스너 등록
+      listener = await Browser.addListener('browserPageLoaded', async () => {
+        // gotox() 실행 완료까지 2초 대기
+        await new Promise(r => setTimeout(r, 2000));
+
+        try {
+          // evaluateJavaScript로 .contentbox innerHTML 추출
+          const result = await Browser.evaluateJavaScript({
+            javascript: `
+              (function() {
+                var box = document.querySelector('.contentbox');
+                if (!box) return JSON.stringify({ error: 'contentbox not found' });
+                return JSON.stringify({ html: document.documentElement.outerHTML });
+              })()
+            `
+          });
+
+          // result.value는 JSON 문자열
+          let parsed;
+          try {
+            parsed = JSON.parse(result?.value ?? result);
+          } catch (e) {
+            parsed = { error: 'JSON parse 실패: ' + String(result?.value ?? result) };
+          }
+
+          if (parsed.error) {
+            finish({ error: 'Sangtacviet WebView DOM 추출 실패: ' + parsed.error });
+          } else {
+            clearTimeout(timeout);
+            finish({ html: parsed.html, status: 200, url });
+          }
+        } catch (evalErr) {
+          // evaluateJavaScript 미지원 → 옵션 A(커스텀 플러그인)로 전환 필요
+          finish({
+            error:
+              'evaluateJavaScript 미지원 (옵션 A 커스텀 플러그인 전환 필요): ' +
+              evalErr.message
+          });
+        }
+      });
+
+      // WebView 열기 (사용자에게 잠깐 보일 수 있음 — 로딩 스피너로 덮기)
+      await Browser.open({ url, presentationStyle: 'popover' });
+    } catch (openErr) {
+      finish({ error: 'Browser.open 실패: ' + openErr.message });
+    }
+  });
+}
 
 /**
  * 네이티브 앱(APK) 전용 통신 모듈 (CORS 제약 없음)
@@ -17,8 +122,11 @@ export async function fetchNativeDirect(url) {
     acceptLang = 'vi-VN,vi;q=0.9,zh-CN;q=0.8,en;q=0.7';
   }
 
+  // [76단계] 데스크탑 Chrome UA 사용
+  // 모바일 UA는 Sangtacviet에서 다른 HTML 구조를 내려줄 수 있고,
+  // 크롬 데스크탑으로 직접 접속 시 봇 차단 없이 성공했으므로 동일하게 맞춤
   const headers = {
-    'User-Agent': 'Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
     'Accept-Language': acceptLang,
   };
@@ -38,79 +146,11 @@ export async function fetchNativeDirect(url) {
 
   try {
     if (hostname.includes('sangtacviet.com')) {
-      // 1. 본문 껍데기 GET 요청
-      const getRes = await CapacitorHttp.request({
-        url: url,
-        method: 'GET',
-        headers: headers,
-        responseType: 'text'
-      });
-      
-      let htmlContent = getRes.data;
-      
-      // 2. 본문이 비어있으면(Ajax 렌더링 방식) POST 요청 추가
-      if (htmlContent.includes('class="contentbox"') && !htmlContent.includes('<i>')) {
-        const match = url.match(/truyen\/(.+)/);
-        if (match) {
-          const parts = match[1].split('/').filter(Boolean);
-          const host_name = parts[0];
-          let book_id, chapter_id;
-          
-          if (parts.length >= 3) {
-            book_id = parts[parts.length - 2];
-            chapter_id = parts[parts.length - 1];
-          } else {
-            book_id = parts[1];
-            chapter_id = parts.length > 2 ? parts[2] : '1';
-          }
-          
-          const ajaxUrl = `https://sangtacviet.com/index.php?bookid=${book_id}&h=${host_name}&c=${chapter_id}&ngmar=readc&sajax=readchapter&sty=1`;
-          
-          let cookieStr = '';
-          const cookieRegex = /document\.cookie\s*=\s*["']([^=]+)=([^;"']+)["']/g;
-          let m;
-          while ((m = cookieRegex.exec(htmlContent)) !== null) {
-            cookieStr += `${m[1]}=${m[2]}; `;
-          }
-          
-          const ajaxHeaders = {
-            ...headers,
-            'Referer': getRes.url || url,
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'X-Requested-With': 'XmlHttpRequest',
-            'Origin': 'https://sangtacviet.com',
-          };
-          if (cookieStr) {
-            ajaxHeaders['Cookie'] = cookieStr;
-          }
-
-          const ajaxRes = await CapacitorHttp.request({
-            url: ajaxUrl,
-            method: 'POST',
-            headers: ajaxHeaders,
-            data: "rescan=true&k=",
-            responseType: 'text'
-          });
-          
-          let ajaxHtml = ajaxRes.data;
-          if (typeof ajaxHtml === 'string' && ajaxHtml.trim().startsWith('{')) {
-            try {
-              const parsed = JSON.parse(ajaxHtml);
-              if (parsed.code !== undefined && parsed.code !== 0) {
-                return { error: 'Sangtacviet 봇 차단 발생 (AJAX 호출 실패): ' + ajaxHtml };
-              }
-              ajaxHtml = parsed.data || parsed.html || ajaxHtml;
-            } catch(e){}
-          }
-          
-          htmlContent = htmlContent.replace(
-            /(<div[^>]*class=["']?[^"']*contentbox[^"']*["']?[^>]*>)/,
-            `$1\n${ajaxHtml}\n`
-          );
-        }
-      }
-      
-      return { html: htmlContent, status: getRes.status, url: getRes.url || url };
+      // [77단계] WebView DOM 추출 방식
+      // CapacitorHttp는 JS를 실행하지 못해 gotox() 봇 차단(code:7)을 피할 수 없음.
+      // Browser.open으로 실제 WebView에서 페이지를 렌더링하고,
+      // gotox() 자동 실행 완료 후 .contentbox innerHTML을 evaluateJavaScript로 추출한다.
+      return await fetchSangtacvietViaWebView(url);
     }
 
     // 일반 사이트 프로세스
