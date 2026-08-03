@@ -2454,7 +2454,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
           />
           <div style={{ display: 'flex', gap: '12px', marginTop: '16px' }}>
             <button onClick={() => setShowPresetModal(false)} style={{ flex: 1, backgroundColor: '#252630', border: 'none', color: '#e2e4ed', padding: '14px', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px' }}>취소</button>
-            <button onClick={handleSaveModalPreset} style={{ flex: 2, backgroundColor: 'linear-gradient(135deg, #81c784, #83c5be)', backgroundColor: '#81c784', border: 'none', color: '#11111b', padding: '14px', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px' }}>적용 및 닫기</button>
+            <button onClick={handleSaveModalPreset} style={{ flex: 2, background: 'linear-gradient(135deg, #81c784, #83c5be)', border: 'none', color: '#11111b', padding: '14px', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px' }}>적용 및 닫기</button>
           </div>
         </div>
       )}
