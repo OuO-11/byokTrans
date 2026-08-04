@@ -233,6 +233,26 @@ function App() {
   }, [activeTab, showPresetModal]);
 
   useEffect(() => {
+    const handlePopState = (e) => {
+      if (showPresetModalRef.current) return;
+
+      if (e.state && e.state.isAppInternal) {
+        if (e.state.mode === 'viewer' && startViewerTranslationRef.current) {
+          startViewerTranslationRef.current(e.state.url, e.state.chapter, false, true);
+        } else if (e.state.mode === 'pageResult' && startPageTranslationRef.current) {
+          startPageTranslationRef.current(e.state.url, false, true);
+        }
+      } else {
+        if (activeTabRef.current === 'viewer' || activeTabRef.current === 'pageResult') {
+          setActiveTab('library');
+        }
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
 
     const backButtonListener = CapacitorApp.addListener('backButton', () => {
@@ -242,9 +262,9 @@ function App() {
         return;
       }
 
-      // 2. 뷰어/결과창(하위 상세 화면)에 있는 경우 -> 보관함 메인으로 복귀
+      // 2. 뷰어/결과창(하위 상세 화면)에 있는 경우 -> 히스토리 백 (popstate 발생)
       if (activeTabRef.current === 'viewer' || activeTabRef.current === 'pageResult') {
-        setActiveTab('library');
+        window.history.back();
         return;
       }
 
@@ -296,7 +316,7 @@ function App() {
       };
       console.error("Reporting Error to Vercel Console:", errorPayload);
 
-      await fetch('/api/log_error', {
+      await fetch('https://byoktrans.vercel.app/api/log_error', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(errorPayload)
@@ -627,53 +647,112 @@ function App() {
     const BATCH_SIZE = 15;
     let translatedCount = 0;
 
-    for (let i = 0; i < textNodes.length; i += BATCH_SIZE) {
-      if (translationSessionIdRef.current !== sessionId) {
-        console.log('[Iframe Real-time Translator] Cancelled or superseded by new session.');
-        break;
-      }
+    const colomoSystemPrompt = `[공리]
+입력: 원문 섹션이 주어짐. 번역 섹션이 함께 주어질 수도 있으며, 기존 번역문이므로 그 다음 줄부터 마저 번역.
+출력: 다른 어떠한 응답도 없이 한국어 번역 결과만을 즉시 제공. HTML 구조를 훼손하거나 삭제하지 않고 그대로 유지. 반드시 </main>으로 종료.
 
-      const batch = textNodes.slice(i, i + BATCH_SIZE);
-      const batchText = batch.map((node, index) => `[${index}] ${node.nodeValue.trim()}`).join('\n');
-      const batchPrompt = `${systemPrompt}\n\nIMPORTANT: You must translate each line marked with '[number]' in order. Maintain the format '[number] Translated text'. Do not merge lines or omit numbers.`;
+섹션: <main id="섹션유형">...</main> 형식.
+원문 섹션: 각 줄은 <p id="ID">원문</p> 형식. 번역 시 <p id="ID"> 부분은 반드시 그대로 유지.
+번역 섹션: 각 줄은 <p id="ID">번역</p> 형식. 동일한 ID의 원문에 정확히 일대일대응하도록 번역 작성. 문장이 여러 줄에 걸쳐 있는 경우 절대로 문장을 임의로 합치지 않고 엄격하게 각 줄을 독립적으로 번역.
 
-      try {
-        const translatedBatch = await translateTextWithRotation(batchText, batchPrompt, model);
+[지침]
+직역투를 피하며 최대한 자연스럽게 의역하되, 원문의 말투와 내용은 철저히 유지. 원문의 사실 관계를 왜곡하거나 고유명사의 과한 현지화 금지.
+일본어 고유명사는 국립국어원 표기법을 무시하고 해당 장르 및 작품에서 대중에게 친숙한 서브컬처 통용 표기를 최우선하되, 통용 표기가 불확실하다면 실제 일본어 발음에 가깝게 표기.
+일본어가 아닌 중국어 고유명사는 원어 발음 대신 한국 한자음을 엄격히 지키며 표기.
 
-        // 번역 결과를 실제 iframe 문서 노드에 즉시 주입 (실시간 화면 한글 변환!)
-        const lines = translatedBatch.split('\n');
-        const translationMap = {};
+{{note}}`;
+    
+    const finalSystemPrompt = colomoSystemPrompt.replace('{{note}}', systemPrompt);
+    
+    if (!translationAbortControllerRef.current) {
+        translationAbortControllerRef.current = new AbortController();
+    }
+    
+    let translatedList = new Array(totalNodes).fill('');
+    let doneTranslation = false;
+    let continuationCount = 0;
+    const maxContinuationAttempts = 4;
 
-        lines.forEach(line => {
-          const match = line.match(/^\[(\d+)\]\s*(.*)/);
-          if (match) {
-            const index = parseInt(match[1]);
-            const translatedVal = match[2].trim();
-            translationMap[index] = translatedVal;
-          }
-        });
+    while (!doneTranslation && continuationCount < maxContinuationAttempts) {
+        if (translationSessionIdRef.current !== sessionId) break;
 
-        batch.forEach((node, index) => {
-          if (translationMap[index]) {
-            node.nodeValue = translationMap[index];
-          }
-        });
+        const pendingIndices = [];
+        for (let i = 0; i < totalNodes; i++) {
+            if (translatedList[i] === '' || translatedList[i] === undefined) {
+                pendingIndices.push(i);
+            }
+        }
 
-      } catch (e) {
-        console.error(`[Iframe Batch Failed] Index ${i} to ${i + BATCH_SIZE}:`, e);
-        batch.forEach(node => {
-          node.nodeValue = `${node.nodeValue} (번역 실패)`;
-        });
-      }
+        if (pendingIndices.length === 0) {
+            doneTranslation = true;
+            break;
+        }
 
-      translatedCount += batch.length;
-      const progressPercent = Math.min(Math.round((translatedCount / totalNodes) * 100), 100);
-      if (translationSessionIdRef.current === sessionId) {
-        setTransProgress(progressPercent);
-      }
+        console.log(`[Iframe Continuation #${continuationCount + 1}] Processing ${pendingIndices.length} pending nodes...`);
+
+        const pendingRawText = pendingIndices.map(idx => `<p id="${idx}">${textNodes[idx].nodeValue.trim()}</p>`).join('\n');
+        
+        const handleStreamChunk = (fullAiTextBuffer) => {
+            if (translationSessionIdRef.current !== sessionId) return;
+
+            const chunksByTag = fullAiTextBuffer.split(/<p id="(\d+)">/);
+            let updatedCount = 0;
+            
+            for (let i = 1; i < chunksByTag.length; i += 2) {
+                const idx = parseInt(chunksByTag[i]);
+                let text = chunksByTag[i + 1] || '';
+                text = text.replace(/<\/p>[\s\S]*$/, '').trim();
+                
+                if (pendingIndices.includes(idx) && translatedList[idx] !== text) {
+                    translatedList[idx] = text;
+                    textNodes[idx].nodeValue = text;
+                    updatedCount++;
+                }
+            }
+            
+            if (updatedCount > 0) {
+                const completedCount = translatedList.filter(t => t !== '').length;
+                const progressPercent = Math.min(Math.round((completedCount / totalNodes) * 100), 99);
+                setTransProgress(progressPercent);
+            }
+        };
+        
+        try {
+            await translateTextStreamWithRotation(
+                `<main id="원문">\n${pendingRawText}\n</main>`,
+                finalSystemPrompt,
+                model,
+                handleStreamChunk,
+                translationAbortControllerRef.current.signal,
+                '<main id="번역">\n'
+            );
+        } catch (e) {
+            console.warn(`[Iframe Streaming Attempt ${continuationCount + 1} Failed]:`, e);
+            if (cancelTranslationRef.current || e.message?.includes('중단') || e.name === 'AbortError') {
+                break;
+            }
+            if (e.message?.includes('ALL_KEYS_EXHAUSTED')) {
+                alert(`[API 할당량 소진] 모든 API Key의 무료 제공량이 초과되었습니다.\n잠시 후 다시 시도해 주세요.`);
+                break;
+            } else if (e.message?.includes('status: 400') || e.message?.includes('[NON_RETRIABLE_SAFETY]')) {
+                // Safety filter hit, give up on the first pending node and continue
+                if (pendingIndices.length > 0) {
+                    translatedList[pendingIndices[0]] = `[번역 불가] ${textNodes[pendingIndices[0]].nodeValue}`;
+                }
+            } else {
+                if (continuationCount === maxContinuationAttempts - 1) {
+                    alert(`[네트워크 오류] 일시적인 서버 불안정으로 일부 웹페이지 번역이 누락되었습니다.\n사유: ${e.message}`);
+                } else {
+                    await new Promise(r => setTimeout(r, 2500));
+                }
+            }
+        }
+        
+        continuationCount++;
     }
 
     if (translationSessionIdRef.current === sessionId) {
+      setTransProgress(100);
       setIsTranslating(false);
       try {
         // [54단계] 완성된 번역 HTML을 메모리 캐시에 저장
@@ -685,7 +764,8 @@ function App() {
   };
 
   // 뷰어 모드(본문 리더기) 전용 번역 함수
-  const startViewerTranslation = async (targetUrl, forceChapter = null, bypassCache = false) => {
+  const startViewerTranslation = async (targetUrl, forceChapter = null, bypassCache = false, fromPopState = false) => {
+    startViewerTranslationRef.current = startViewerTranslation;
     setTransMode('viewer');
     const activeKey = getActiveApiKey();
     if (!activeKey) {
@@ -812,11 +892,17 @@ function App() {
 
         setViewerParagraphs(formatted);
         setTransProgress(100);
+        if (!fromPopState) {
+          window.history.pushState({ isAppInternal: true, url: targetUrl, mode: 'viewer', chapter: chapterToUse }, '');
+        }
         setActiveTab('viewer');
       } else {
         const initialViewerLines = paragraphs.map(p => ({ original: p, translated: 'AI 번역 대기 중...' }));
 
         setViewerParagraphs(initialViewerLines);
+        if (!fromPopState) {
+          window.history.pushState({ isAppInternal: true, url: targetUrl, mode: 'viewer', chapter: chapterToUse }, '');
+        }
         setActiveTab('viewer');
 
         translationAbortControllerRef.current = new AbortController();
@@ -935,7 +1021,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
             } else if (errMsg.includes('status: 400')) {
               const userAgreed = window.confirm(`[API 요청 오류] 번역 요청 중 치명적인 문법/구조 오류가 발생했습니다.\n사유: status: 400 - ai 응답 차단\n\n서버로 상세 오류 내역을 전송하시겠습니까?`);
               if (userAgreed) {
-                fetch('/api/report_feedback', {
+                fetch('https://byoktrans.vercel.app/api/report_feedback', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
@@ -1021,6 +1107,9 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
       setIsTranslating(false);
       setIframeKey(prev => prev + 1);
       setNovelHtmlResult(pageCacheRef.current[targetUrl]);
+      if (!fromPopState) {
+        window.history.pushState({ isAppInternal: true, url: targetUrl, mode: 'pageResult', chapter: null }, '');
+      }
       setActiveTab('pageResult');
       return;
     }
@@ -1081,6 +1170,9 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
 
       setIframeKey(prev => prev + 1);
       setNovelHtmlResult(themeInjectedHtml);
+      if (!fromPopState) {
+        window.history.pushState({ isAppInternal: true, url: targetUrl, mode: 'pageResult', chapter: null }, '');
+      }
       setActiveTab('pageResult');
     } catch (err) {
       if (cancelTranslationRef.current || err.name === 'AbortError') {
@@ -1388,7 +1480,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
         };
       }
 
-      const res = await fetch('/api/report_feedback', {
+      const res = await fetch('https://byoktrans.vercel.app/api/report_feedback', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
