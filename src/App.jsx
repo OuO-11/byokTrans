@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Capacitor } from '@capacitor/core';
+import { App as CapacitorApp } from '@capacitor/app';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { fetchNativeDirect } from './nativeProxy';
@@ -9,6 +10,7 @@ import { getApiKeys, saveApiKeys, getActiveApiKey, fetchAvailableModels, transla
 import { getPromptsTree, savePreset, deletePreset, getPromptContent } from './promptManager.js';
 import { translateFullPage, extractNovelContent } from './parser.js';
 import { downloadCachedEpisodes } from './downloader.js';
+import darkReaderCodeRawString from './plugins/darkreader.js?raw';
 
 
 // 언어별 전용 기본 번역기 프롬프트 (프롬프트 1) 기본값 정의
@@ -60,40 +62,6 @@ const DEFAULT_READER_SETTINGS = {
   bottomSpacing: true
 };
 
-/**
- * 모바일 PWA 환경에서의 비동기 지연으로 인한 클립보드 차단 우회를 포함한 하이브리드 복사 헬퍼 함수
- */
-const copyToClipboard = async (text) => {
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch (e) {
-      console.warn("Modern clipboard API failed, using fallback copy:", e);
-    }
-  }
-
-  // Fallback: 가상 textarea 생성 복사 (동기식 컨텍스트 유지로 모바일 PWA 차단 방어)
-  const textArea = document.createElement("textarea");
-  textArea.value = text;
-  textArea.style.position = "fixed";
-  textArea.style.top = "-9999px";
-  textArea.style.left = "-9999px";
-  document.body.appendChild(textArea);
-
-  textArea.focus();
-  textArea.select();
-
-  try {
-    const successful = document.execCommand('copy');
-    document.body.removeChild(textArea);
-    if (!successful) throw new Error("copy command failed");
-    return true;
-  } catch (err) {
-    document.body.removeChild(textArea);
-    throw err;
-  }
-};
 
 function App() {
   const [activeTab, setActiveTab] = useState('library');
@@ -144,6 +112,21 @@ function App() {
   const [appTheme, setAppTheme] = useState(() => {
     return localStorage.getItem('noveltrans_app_theme') || 'dark';
   });
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', appTheme);
+    // 웹페이지 iframe 모드가 켜져있다면 테마 실시간 토글 함수 직접 호출
+    const iframe = document.querySelector('iframe');
+    if (iframe && iframe.contentWindow) {
+      try {
+        if (typeof iframe.contentWindow.applyIframeTheme === 'function') {
+          iframe.contentWindow.applyIframeTheme(appTheme);
+        }
+      } catch (e) {
+        console.warn("Iframe theme sync blocked by CORS or not ready");
+      }
+    }
+  }, [appTheme]);
 
   // 데이터 이전 및 iframe 리프레시 상태 변수
   const [importText, setImportText] = useState('');
@@ -217,6 +200,20 @@ function App() {
 
   // 50단계/53단계 핵심: 뒤로가기 제어용 상태 Ref 동기화 및 History API 인터셉터
   const activeTabRef = useRef(activeTab);
+  const showPresetModalRef = useRef(showPresetModal);
+  const lastBackPressTimeRef = useRef(0);
+
+  // 안드로이드 하드웨어 뒤로가기 토스트 메시지 상태
+  const [toastMessage, setToastMessage] = useState('');
+  const toastTimeoutRef = useRef(null);
+
+  const showToast = (msg) => {
+    setToastMessage(msg);
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    toastTimeoutRef.current = setTimeout(() => {
+      setToastMessage('');
+    }, 2000);
+  };
 
   // popstate 핸들러용 최신 함수 참조 유지
   const startViewerTranslationRef = useRef(null);
@@ -227,11 +224,44 @@ function App() {
   const pageCacheRef = useRef({});
 
   useEffect(() => {
+    activeTabRef.current = activeTab;
+    showPresetModalRef.current = showPresetModal;
     // 50단계/53단계: 단순 탭 진입 시 상태 연동
     if (activeTab === 'translate' || activeTab === 'viewer' || activeTab === 'pageResult') {
       setLastTranslateSubTab(activeTab);
     }
-  }, [activeTab]);
+  }, [activeTab, showPresetModal]);
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    const backButtonListener = CapacitorApp.addListener('backButton', () => {
+      // 1. 모달 팝업이 켜져 있는 경우 -> 모달만 닫기
+      if (showPresetModalRef.current) {
+        setShowPresetModal(false);
+        return;
+      }
+
+      // 2. 뷰어/결과창(하위 상세 화면)에 있는 경우 -> 보관함 메인으로 복귀
+      if (activeTabRef.current === 'viewer' || activeTabRef.current === 'pageResult') {
+        setActiveTab('library');
+        return;
+      }
+
+      // 3. 최상위 루트 화면(보관함, 설정 등)인 경우 -> 이중 클릭으로 앱 종료
+      const now = Date.now();
+      if (now - lastBackPressTimeRef.current < 2000) {
+        CapacitorApp.exitApp();
+      } else {
+        lastBackPressTimeRef.current = now;
+        showToast("'뒤로' 버튼을 한 번 더 누르시면 종료됩니다.");
+      }
+    });
+
+    return () => {
+      backButtonListener.then(listener => listener.remove());
+    };
+  }, []);
 
   // 뷰어 및 렌더링 상태
   const [viewerTitle, setViewerTitle] = useState('');
@@ -692,7 +722,7 @@ function App() {
         } catch (e) {
           if (!res.ok) throw new Error('서버 통신 실패 (상태 코드: ' + res.status + ')');
         }
-        
+
         if (!res.ok && !data?.error) {
           throw new Error('서버 통신 실패 (상태 코드: ' + res.status + ')');
         }
@@ -768,8 +798,8 @@ function App() {
         let parsedLines = [];
         try {
           parsedLines = JSON.parse(cached.translatedText);
-        } catch(e) {}
-        
+        } catch (e) { }
+
         let formatted = [];
         // 새로운 Pair 객체 배열인지 레거시 문자열 배열인지 구분
         if (parsedLines.length > 0 && typeof parsedLines[0] === 'object' && parsedLines[0] !== null && 'translated' in parsedLines[0]) {
@@ -785,7 +815,7 @@ function App() {
         setActiveTab('viewer');
       } else {
         const initialViewerLines = paragraphs.map(p => ({ original: p, translated: 'AI 번역 대기 중...' }));
-        
+
         setViewerParagraphs(initialViewerLines);
         setActiveTab('viewer');
 
@@ -839,17 +869,22 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
             const handleStreamChunk = (chunk) => {
               fullAiTextBuffer = chunk;
 
-              // [45단계 핵심] 콜로모 엔진식 정밀 태그(ID) 추출 방식 (정규식 찌꺼기 삭제 방지)
-              const matches = [...fullAiTextBuffer.matchAll(/<p id="(\d+)">([\s\S]*?)(?:<\/p>|$)/g)];
+              // [45단계 핵심] 정규식 매칭 실패에 따른 스트리밍 지연 방지를 위해 split() 기반 파싱 사용
+              const chunksByTag = fullAiTextBuffer.split(/<p id="(\d+)">/);
               let maxProcessedIndex = -1;
 
-              matches.forEach(match => {
-                const idx = parseInt(match[1]);
+              // chunksByTag는 ["", "0", "내용...", "1", "내용...", ...] 형태로 쪼개짐
+              for (let i = 1; i < chunksByTag.length; i += 2) {
+                const idx = parseInt(chunksByTag[i]);
+                let text = chunksByTag[i + 1] || '';
+                // 닫는 태그(</p>) 이후의 찌꺼기 문자열이 있다면 제거
+                text = text.replace(/<\/p>[\s\S]*$/, '').trim();
+                
                 if (pendingIndices.includes(idx)) {
-                  translatedList[idx] = match[2].trim();
+                  translatedList[idx] = text;
                   if (idx > maxProcessedIndex) maxProcessedIndex = idx;
                 }
-              });
+              }
 
               setViewerParagraphs(prev => {
                 const next = [...prev];
@@ -975,7 +1010,8 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
 
     setIsTranslating(true);
     setTransProgress(5);
-    setNovelHtmlResult('');
+    // [FIX] Do NOT clear novelHtmlResult here. If we clear it, the iframe turns blank (black screen in dark mode)
+    // while waiting for the fetch. By keeping the old HTML, it behaves gracefully like before.
 
     const basePrompt = basePrompts[selectedLang] || '';
     const rawSubPrompt = selectedPreset === 'default' ? '' : getPromptContent(selectedLang, selectedPreset);
@@ -999,7 +1035,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
         if (!res.ok) throw new Error('CORS 프록시 서버 통신 실패');
         data = await res.json();
       }
-      
+
       if (data?.error) throw new Error(data.error);
 
       const activeSubPrompt = filterActiveGlossary(rawSubPrompt, data.html);
@@ -1010,12 +1046,38 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
       setPageSystemPrompt(finalSystemPrompt);
       setTransProgress(5);
 
-      // 테마 CSS 강제 주입
-      const themeCss = appTheme === 'dark' 
-        ? `<style>body { background-color: #121310 !important; color: #e2e4e0 !important; } a { color: #81c784 !important; }</style>`
-        : `<style>body { background-color: #ffffff !important; color: #111111 !important; } a { color: #4285f4 !important; }</style>`;
-      
-      const themeInjectedHtml = data.html.replace('<head>', `<head>${themeCss}<meta name="color-scheme" content="${appTheme}">`);
+      // 웹페이지 테마 제어 스크립트 강제 주입 (Darkreader 연동 + 실시간 동기화)
+      const themeScript = `
+        <style>
+           html { transition: background-color 0.3s; }
+           html[data-iframe-theme="dark"] { background-color: #121310 !important; }
+           html[data-iframe-theme="light"] { background-color: #ffffff !important; }
+        </style>
+        <script>${darkReaderCodeRawString}</script>
+        <script>
+          window.applyIframeTheme = function(theme) {
+            document.documentElement.setAttribute('data-iframe-theme', theme);
+            if (typeof DarkReader !== 'undefined') {
+              if (theme === 'dark') {
+                DarkReader.enable({ brightness: 100, contrast: 90, sepia: 10 });
+              } else {
+                DarkReader.disable();
+              }
+            }
+          };
+          // 초기 테마 설정
+          window.applyIframeTheme('${appTheme}');
+        </script>
+      `;
+
+      let themeInjectedHtml = data.html;
+      if (/<head[^>]*>/i.test(themeInjectedHtml)) {
+        themeInjectedHtml = themeInjectedHtml.replace(/(<head[^>]*>)/i, (match) => `${match}${themeScript}<meta name="color-scheme" content="${appTheme}">`);
+      } else if (/<html[^>]*>/i.test(themeInjectedHtml)) {
+        themeInjectedHtml = themeInjectedHtml.replace(/(<html[^>]*>)/i, (match) => `${match}<head>${themeScript}<meta name="color-scheme" content="${appTheme}"></head>`);
+      } else {
+        themeInjectedHtml = `<head>${themeScript}<meta name="color-scheme" content="${appTheme}"></head>` + themeInjectedHtml;
+      }
 
       setIframeKey(prev => prev + 1);
       setNovelHtmlResult(themeInjectedHtml);
@@ -1077,6 +1139,15 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
 
       // 임시 빈 문서 로딩 시에는 번역기 가동을 방지하여 isTranslating 상태가 false로 강제 종료되는 현상 방지
       if (!novelHtmlResult) return;
+
+      // [테마 동기화] iframe이 로드(또는 캐시에서 복원)될 때 현재 앱 테마를 강제로 한번 밀어넣음
+      try {
+        if (typeof iframe.contentWindow.applyIframeTheme === 'function') {
+          iframe.contentWindow.applyIframeTheme(appTheme);
+        }
+      } catch (e) {
+        // Ignore CORS errors
+      }
 
       // [39단계/54단계 핵심] 번역 기동 상태라면 백그라운드에서 실시간 텍스트 번역 교체 태스크 가동
       if (isTranslating && !iframeDoc.__isTranslating) {
@@ -1174,16 +1245,12 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
 
       if (Capacitor.isNativePlatform()) {
         const result = await Filesystem.writeFile({
-          path: fileName,
+          path: `Download/${fileName}`,
           data: jsonStr,
-          directory: Directory.Cache,
+          directory: Directory.ExternalStorage,
           encoding: 'utf8'
         });
-        await Share.share({
-          title: fileName,
-          url: result.uri,
-          dialogTitle: '백업 파일 저장하기'
-        });
+        alert('보관함 백업 파일이 기기의 [다운로드(Download)] 폴더에 직접 저장되었습니다.\n' + result.uri);
       } else {
         const blob = new Blob([jsonStr], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
@@ -1194,9 +1261,9 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
         link.click();
         document.body.removeChild(link);
         URL.revokeObjectURL(url);
+        
+        alert('보관함 백업 파일 저장이 완료되었습니다.');
       }
-
-      alert('보관함 백업 파일 저장이 완료되었습니다.');
     } catch (err) {
       alert('백업 파일 생성에 실패했습니다: ' + err.message);
     }
@@ -1353,8 +1420,8 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
         alignItems: 'center',
         justifyContent: 'center',
         minHeight: '100vh',
-        backgroundColor: '#101210',
-        color: '#e2e4e0',
+        backgroundColor: 'var(--bg-main)',
+        color: 'var(--text-main)',
         fontFamily: 'system-ui, -apple-system, sans-serif'
       }}>
         <div style={{
@@ -1366,7 +1433,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
           animation: 'spin 1s linear infinite',
           marginBottom: '16px'
         }} />
-        <span style={{ fontSize: '14px', color: '#aab0a6' }}>로컬 데이터베이스 연결 중...</span>
+        <span style={{ fontSize: '14px', color: 'var(--text-muted)' }}>로컬 데이터베이스 연결 중...</span>
         <style>{`
           @keyframes spin {
             0% { transform: rotate(0deg); }
@@ -1384,8 +1451,8 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
       display: 'flex',
       flexDirection: 'column',
       minHeight: '100vh',
-      backgroundColor: '#101210',
-      color: '#e2e4e0',
+      backgroundColor: 'var(--bg-main)',
+      color: 'var(--text-main)',
       fontFamily: 'system-ui, -apple-system, sans-serif'
     }}>
       {/* 헤더 (22단계: 뷰어 화면 진입 시 헤더를 숨겨 겹침 현상 해소 및 꽉 찬 화면 지원) */}
@@ -1395,8 +1462,8 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '16px 20px',
-          borderBottom: '1px solid #242824',
-          backgroundColor: '#0e100e',
+          borderBottom: '1px solid var(--border-main)',
+          backgroundColor: 'var(--bg-main)',
           position: 'sticky',
           top: 0,
           zIndex: 10
@@ -1412,11 +1479,11 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
             }}>
               <BookOpen size={24} color="#11111b" />
             </div>
-            <span style={{ fontSize: '20px', fontWeight: 'bold', letterSpacing: '-0.5px' }}>
-              Byok<span style={{ color: '#81c784' }}>Trans</span>
+            <span style={{ fontSize: '20px', fontWeight: 'bold', letterSpacing: '-0.5px', color: 'var(--text-main)' }}>
+              Byok<span style={{ color: 'var(--primary)' }}>Trans</span>
             </span>
           </div>
-          
+
           {/* 다크/라이트 테마 토글 버튼 */}
           <button
             onClick={() => {
@@ -1425,11 +1492,11 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
               localStorage.setItem('noveltrans_app_theme', newTheme);
             }}
             style={{
-              background: '#181c18',
-              border: '1px solid #242824',
+              background: 'var(--bg-card)',
+              border: '1px solid var(--border-main)',
               borderRadius: '8px',
               padding: '8px',
-              color: '#81c784',
+              color: 'var(--primary)',
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
@@ -1463,7 +1530,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                 padding: '50px 20px',
                 border: '2px dashed #242824',
                 borderRadius: '16px',
-                color: '#aab0a6'
+                color: 'var(--text-muted)'
               }}>
                 보관함이 비어 있습니다. [실시간번역] 탭으로 이동하여 번역을 수행하면 소설이 이곳에 자동 적재됩니다.
               </div>
@@ -1475,7 +1542,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    backgroundColor: '#0e100e',
+                    backgroundColor: 'var(--bg-main)',
                     border: '1px solid #242824',
                     borderRadius: '16px',
                     padding: '16px',
@@ -1484,7 +1551,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                     transition: 'transform 0.15s'
                   }}
                 >
-                  <div style={{ backgroundColor: '#181c18', padding: '10px', borderRadius: '12px' }}>
+                  <div style={{ backgroundColor: 'var(--bg-card)', padding: '10px', borderRadius: '12px' }}>
                     <FolderHeart size={22} color="#e78284" />
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -1504,8 +1571,8 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                       {novel.title}
                     </h4>
                     <div style={{ display: 'flex', gap: '8px', fontSize: '11px' }}>
-                      <span style={{ backgroundColor: '#181c18', padding: '2px 6px', borderRadius: '4px', color: '#81c784' }}>{novel.site}</span>
-                      <span style={{ color: '#aab0a6' }}>마지막으로 읽은 회차: {novel.lastReadChapter}화</span>
+                      <span style={{ backgroundColor: 'var(--bg-card)', padding: '2px 6px', borderRadius: '4px', color: 'var(--primary)' }}>{novel.site}</span>
+                      <span style={{ color: 'var(--text-muted)' }}>마지막으로 읽은 회차: {novel.lastReadChapter}화</span>
                     </div>
                   </div>
 
@@ -1513,14 +1580,14 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <button
                       onClick={(e) => handleDownload(novel, e)}
-                      style={{ background: 'none', border: 'none', color: '#a6d189', padding: '6px', cursor: 'pointer' }}
+                      style={{ background: 'none', border: 'none', color: 'var(--primary)', padding: '6px', cursor: 'pointer' }}
                       title="텍스트 파일 다운로드"
                     >
                       <Download size={18} />
                     </button>
                     <button
                       onClick={(e) => handleDeleteNovel(novel.id, novel.title, e)}
-                      style={{ background: 'none', border: 'none', color: '#e78284', padding: '6px', cursor: 'pointer' }}
+                      style={{ background: 'none', border: 'none', color: 'var(--danger)', padding: '6px', cursor: 'pointer' }}
                       title="삭제"
                     >
                       <Trash2 size={18} />
@@ -1538,18 +1605,18 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
             <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 'bold' }}>AI 실시간 번역 시작</h3>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <label style={{ fontSize: '13px', color: '#aab0a6' }}>소설 주소 (URL)</label>
+              <label style={{ fontSize: '13px', color: 'var(--text-muted)' }}>소설 주소 (URL)</label>
               <textarea
                 rows={3}
                 placeholder="예: https://www.52shuku.net/bl/..."
                 value={inputUrl}
                 onChange={handleUrlChange}
                 style={{
-                  backgroundColor: '#0e100e',
+                  backgroundColor: 'var(--bg-main)',
                   border: '1px solid #242824',
                   borderRadius: '10px',
                   padding: '12px',
-                  color: '#e2e4e0',
+                  color: 'var(--text-main)',
                   fontSize: '14px',
                   resize: 'vertical',
                   fontFamily: 'inherit',
@@ -1562,7 +1629,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
             {/* 번역 옵션 그룹 */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: '#aab0a6' }}>번역 모드 (언어 선택)</label>
+                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>번역 모드 (언어 선택)</label>
                 <select
                   value={selectedLang}
                   onChange={(e) => {
@@ -1570,7 +1637,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                     setSelectedPreset('default');
                   }}
                   style={{
-                    backgroundColor: '#0e100e', border: '1px solid #242824', borderRadius: '8px', padding: '8px', color: '#e2e4e0'
+                    backgroundColor: 'var(--bg-main)', border: '1px solid #242824', borderRadius: '8px', padding: '8px', color: 'var(--text-main)'
                   }}
                 >
                   <option value="chinese">중국어 번역기</option>
@@ -1579,12 +1646,12 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: '#aab0a6' }}>프롬프트 템플릿</label>
+                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>프롬프트 템플릿</label>
                 <select
                   value={selectedPreset}
                   onChange={(e) => setSelectedPreset(e.target.value)}
                   style={{
-                    backgroundColor: '#0e100e', border: '1px solid #242824', borderRadius: '8px', padding: '8px', color: '#e2e4e0'
+                    backgroundColor: 'var(--bg-main)', border: '1px solid #242824', borderRadius: '8px', padding: '8px', color: 'var(--text-main)'
                   }}
                 >
                   {Object.keys(currentPresets).map(presetId => (
@@ -1636,7 +1703,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                   alert('번역이 중단되었습니다.');
                 }}
                 style={{
-                  backgroundColor: '#e78284',
+                  backgroundColor: 'var(--danger)',
                   border: 'none',
                   borderRadius: '12px',
                   padding: '12px',
@@ -1668,7 +1735,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                 top: '55px',
                 zIndex: 5,
                 backgroundColor: '#222922',
-                color: '#a6d189',
+                color: 'var(--primary)',
                 border: '1px solid #3d4f3d',
                 padding: '10px 16px',
                 borderRadius: '12px',
@@ -1693,7 +1760,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                     alert('번역이 중단되었습니다.');
                   }}
                   style={{
-                    backgroundColor: '#e78284',
+                    backgroundColor: 'var(--danger)',
                     color: '#11111b',
                     border: 'none',
                     borderRadius: '6px',
@@ -1727,14 +1794,14 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                     setActiveTab('translate');
                     setActiveTab('translate');
                   }}
-                  style={{ background: '#181c18', border: 'none', color: '#81c784', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}
+                  style={{ background: 'var(--bg-card)', border: 'none', color: 'var(--primary)', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold' }}
                 >
                   ← 주소 입력창으로
                 </button>
                 <button
                   onClick={handleReportFeedback}
                   style={{
-                    background: '#181c18',
+                    background: 'var(--bg-card)',
                     border: '1px solid #ea999c',
                     color: '#ea999c',
                     padding: '6px 12px',
@@ -1770,8 +1837,8 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                   </button>
                 )}
               </div>
-              <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 'bold', color: '#81c784' }}>{viewerTitle}</h2>
-              <div style={{ display: 'flex', gap: '10px', fontSize: '12px', color: '#aab0a6', marginTop: '6px' }}>
+              <h2 style={{ margin: 0, fontSize: '20px', fontWeight: 'bold', color: 'var(--primary)' }}>{viewerTitle}</h2>
+              <div style={{ display: 'flex', gap: '10px', fontSize: '12px', color: 'var(--text-muted)', marginTop: '6px' }}>
                 <span>제 {activeViewerChapter}화 감상 중</span>
               </div>
             </div>
@@ -1849,8 +1916,8 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                   <button
                     onClick={() => handleNavigateEpisode(viewerPrevUrl)}
                     style={{
-                      backgroundColor: '#252630',
-                      color: '#e2e4ed',
+                      backgroundColor: 'var(--bg-panel)',
+                      color: 'var(--text-main)',
                       border: '1px solid #2d2d2d',
                       borderRadius: '8px',
                       padding: '10px 18px',
@@ -1867,8 +1934,8 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                   <button
                     onClick={() => handleNavigateEpisode(viewerIndexUrl)}
                     style={{
-                      backgroundColor: '#252630',
-                      color: '#e5c07b',
+                      backgroundColor: 'var(--bg-panel)',
+                      color: 'var(--accent2)',
                       border: '1px solid #2d2d2d',
                       borderRadius: '8px',
                       padding: '10px 18px',
@@ -1885,8 +1952,8 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                   <button
                     onClick={() => handleNavigateEpisode(viewerNextUrl)}
                     style={{
-                      backgroundColor: '#252630',
-                      color: '#e2e4ed',
+                      backgroundColor: 'var(--bg-panel)',
+                      color: 'var(--text-main)',
                       border: '1px solid #2d2d2d',
                       borderRadius: '8px',
                       padding: '10px 18px',
@@ -1913,7 +1980,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
               display: 'flex',
               gap: '8px',
               alignItems: 'center',
-              backgroundColor: '#111311',
+              backgroundColor: 'var(--bg-main)',
               borderBottom: '1px solid #222822',
               flexShrink: 0
             }}>
@@ -1922,13 +1989,13 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                   setLastTranslateSubTab('translate');
                   setActiveTab('translate');
                 }}
-                style={{ background: '#252630', border: 'none', color: '#e2e4ed', padding: '5px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', whiteSpace: 'nowrap' }}
+                style={{ background: 'var(--bg-panel)', border: 'none', color: 'var(--text-main)', padding: '5px 10px', borderRadius: '6px', cursor: 'pointer', fontSize: '12px', whiteSpace: 'nowrap' }}
               >
                 ← 번역창
               </button>
               {/* 번역 완료 상태 표시 */}
               {!isTranslating && (
-                <span style={{ fontSize: '12px', color: '#a6d189' }}>✓ 번역 완료</span>
+                <span style={{ fontSize: '12px', color: 'var(--primary)' }}>✓ 번역 완료</span>
               )}
               {/* 번역 중 진행률 + 중지 버튼 */}
               {isTranslating && (
@@ -1941,7 +2008,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                       translationSessionIdRef.current += 1;
                       setIsTranslating(false);
                     }}
-                    style={{ background: '#e78284', border: 'none', color: '#11111b', padding: '3px 8px', borderRadius: '5px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold', marginLeft: 'auto', whiteSpace: 'nowrap' }}
+                    style={{ background: 'var(--danger)', border: 'none', color: '#11111b', padding: '3px 8px', borderRadius: '5px', cursor: 'pointer', fontSize: '11px', fontWeight: 'bold', marginLeft: 'auto', whiteSpace: 'nowrap' }}
                   >
                     중지
                   </button>
@@ -1952,13 +2019,13 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                 <div style={{ display: 'flex', gap: '6px', marginLeft: 'auto' }}>
                   <button
                     onClick={() => startPageTranslation(inputUrl, true)}
-                    style={{ background: '#222822', border: '1px solid #81c784', color: '#81c784', padding: '3px 8px', borderRadius: '5px', cursor: 'pointer', fontSize: '11px', whiteSpace: 'nowrap' }}
+                    style={{ background: 'var(--border-main)', border: '1px solid #81c784', color: 'var(--primary)', padding: '3px 8px', borderRadius: '5px', cursor: 'pointer', fontSize: '11px', whiteSpace: 'nowrap' }}
                   >
                     재번역
                   </button>
                   <button
                     onClick={handleReportFeedback}
-                    style={{ background: '#222822', border: '1px solid #e78284', color: '#e78284', padding: '3px 8px', borderRadius: '5px', cursor: 'pointer', fontSize: '11px', whiteSpace: 'nowrap' }}
+                    style={{ background: 'var(--border-main)', border: '1px solid #e78284', color: 'var(--danger)', padding: '3px 8px', borderRadius: '5px', cursor: 'pointer', fontSize: '11px', whiteSpace: 'nowrap' }}
                   >
                     오류 신고
                   </button>
@@ -1975,7 +2042,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                 flex: 1,
                 border: 'none',
                 borderRadius: 0,
-                backgroundColor: '#ffffff',
+                backgroundColor: appTheme === 'dark' ? '#121310' : '#ffffff',
                 width: '100%',
                 display: 'block'
               }}
@@ -1989,29 +2056,29 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
             <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 'bold' }}>번역 설정 및 커스터마이징</h3>
 
             {/* 구글 API Key 및 모델 설정 */}
-            <div style={{ backgroundColor: '#121212', padding: '16px', borderRadius: '14px', border: '1px solid #252630', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <h4 style={{ margin: 0, fontSize: '14px', color: '#babbf1' }}>🔑 API & AI 모델 세팅</h4>
+            <div style={{ backgroundColor: 'var(--bg-card)', padding: '16px', borderRadius: '14px', border: '1px solid #252630', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <h4 style={{ margin: 0, fontSize: '14px', color: 'var(--text-muted)' }}>🔑 API & AI 모델 세팅</h4>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: '#a5adce' }}>구글 API Key 목록 (엔터로 구분)</label>
+                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>구글 API Key 목록 (엔터로 구분)</label>
                 <textarea
                   rows={2}
                   value={apiKeysInput}
                   onChange={(e) => setApiKeysInput(e.target.value)}
                   placeholder="API Key를 엔터로 구분하여 입력하세요."
                   style={{
-                    backgroundColor: '#252630', border: 'none', borderRadius: '8px', padding: '10px', color: '#e2e4ed', fontFamily: 'monospace', fontSize: '12px'
+                    backgroundColor: 'var(--bg-panel)', border: 'none', borderRadius: '8px', padding: '10px', color: 'var(--text-main)', fontFamily: 'monospace', fontSize: '12px'
                   }}
                 />
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '12px', color: '#a5adce' }}>사용할 AI 모델</label>
+                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>사용할 AI 모델</label>
                 <select
                   value={selectedModel}
                   onChange={(e) => setSelectedModel(e.target.value)}
                   style={{
-                    backgroundColor: '#252630', border: 'none', borderRadius: '8px', padding: '10px', color: '#e2e4ed', fontSize: '13px'
+                    backgroundColor: 'var(--bg-panel)', border: 'none', borderRadius: '8px', padding: '10px', color: 'var(--text-main)', fontSize: '13px'
                   }}
                 >
                   {availableModels.map(model => (
@@ -2025,7 +2092,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
               <button
                 onClick={handleSaveSettings}
                 style={{
-                  backgroundColor: '#81c784', border: 'none', borderRadius: '8px', padding: '10px', color: '#11111b', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px'
+                  backgroundColor: 'var(--primary)', border: 'none', borderRadius: '8px', padding: '10px', color: '#11111b', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px'
                 }}
               >
                 API/모델 설정 저장
@@ -2033,12 +2100,12 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
             </div>
 
             {/* 프롬프트 1 (Base Prompt) */}
-            <div style={{ backgroundColor: '#111311', padding: '0', borderRadius: '14px', border: '1px solid #222822', overflow: 'hidden' }}>
+            <div style={{ backgroundColor: 'var(--bg-main)', padding: '0', borderRadius: '14px', border: '1px solid #222822', overflow: 'hidden' }}>
               <div
                 onClick={() => setShowBasePromptCollapse(!showBasePromptCollapse)}
-                style={{ padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', backgroundColor: '#161816' }}
+                style={{ padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', backgroundColor: 'var(--bg-panel)' }}
               >
-                <h4 style={{ margin: 0, fontSize: '14px', color: '#e5c07b' }}>🌐 1. 기본 언어 번역기 지침 (프롬프트 1)</h4>
+                <h4 style={{ margin: 0, fontSize: '14px', color: 'var(--accent2)' }}>🌐 1. 기본 언어 번역기 지침 (프롬프트 1)</h4>
                 {showBasePromptCollapse ? <ChevronUp size={16} color="#a5adce" /> : <ChevronDown size={16} color="#a5adce" />}
               </div>
 
@@ -2049,8 +2116,8 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                       onClick={() => setSelectedLang('chinese')}
                       style={{
                         flex: 1, padding: '8px', borderRadius: '6px', border: 'none',
-                        backgroundColor: selectedLang === 'chinese' ? '#e5c07b' : '#252630',
-                        color: selectedLang === 'chinese' ? '#11111b' : '#e2e4ed',
+                        backgroundColor: selectedLang === 'chinese' ? 'var(--accent2)' : 'var(--bg-panel)',
+                        color: selectedLang === 'chinese' ? '#11111b' : 'var(--text-main)',
                         fontWeight: 'bold', cursor: 'pointer', fontSize: '12px'
                       }}
                     >
@@ -2060,8 +2127,8 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                       onClick={() => setSelectedLang('japanese')}
                       style={{
                         flex: 1, padding: '8px', borderRadius: '6px', border: 'none',
-                        backgroundColor: selectedLang === 'japanese' ? '#e5c07b' : '#252630',
-                        color: selectedLang === 'japanese' ? '#11111b' : '#e2e4ed',
+                        backgroundColor: selectedLang === 'japanese' ? 'var(--accent2)' : 'var(--bg-panel)',
+                        color: selectedLang === 'japanese' ? '#11111b' : 'var(--text-main)',
                         fontWeight: 'bold', cursor: 'pointer', fontSize: '12px'
                       }}
                     >
@@ -2071,10 +2138,10 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <label style={{ fontSize: '11px', color: '#a5adce' }}>
+                      <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
                         {selectedLang === 'chinese' ? '중국어' : '일본어'} 번역의 기둥이 되는 시스템 지침입니다.
                       </label>
-                      <button onClick={() => openPresetModal('basePrompt', basePrompts[selectedLang])} style={{ background: 'none', border: 'none', color: '#e5c07b', cursor: 'pointer', fontSize: '16px', padding: '0 4px', lineHeight: '1' }} title="전체화면 편집">
+                      <button onClick={() => openPresetModal('basePrompt', basePrompts[selectedLang])} style={{ background: 'none', border: 'none', color: 'var(--accent2)', cursor: 'pointer', fontSize: '16px', padding: '0 4px', lineHeight: '1' }} title="전체화면 편집">
                         ⛶
                       </button>
                     </div>
@@ -2084,20 +2151,20 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                       onChange={(e) => handleUpdateBasePrompt(selectedLang, e.target.value)}
                       placeholder="언어별 기본 번역 지시 규칙을 입력하세요."
                       style={{
-                        backgroundColor: '#222822', border: 'none', borderRadius: '8px', padding: '10px', color: '#e2e4ed', fontSize: '12px', fontFamily: 'monospace', lineHeight: '1.5'
+                        backgroundColor: 'var(--border-main)', border: 'none', borderRadius: '8px', padding: '10px', color: 'var(--text-main)', fontSize: '12px', fontFamily: 'monospace', lineHeight: '1.5'
                       }}
                     />
-                    <span style={{ fontSize: '11px', color: '#e5c07b', textAlign: 'right' }}>* 입력 즉시 임시 자동 저장됩니다.</span>
+                    <span style={{ fontSize: '11px', color: 'var(--accent2)', textAlign: 'right' }}>* 입력 즉시 임시 자동 저장됩니다.</span>
                   </div>
                 </div>
               )}
             </div>
 
             {/* 프롬프트 2 (Sub Preset) */}
-            <div style={{ backgroundColor: '#111311', padding: '0', borderRadius: '14px', border: '1px solid #222822', overflow: 'hidden' }}>
+            <div style={{ backgroundColor: 'var(--bg-main)', padding: '0', borderRadius: '14px', border: '1px solid #222822', overflow: 'hidden' }}>
               <div
                 onClick={() => setShowPresetPromptCollapse(!showPresetPromptCollapse)}
-                style={{ padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', backgroundColor: '#161816' }}
+                style={{ padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', backgroundColor: 'var(--bg-panel)' }}
               >
                 <h4 style={{ margin: 0, fontSize: '14px', color: '#83c5be' }}>📝 2. 작품별 추가 지침 프리셋 (프롬프트 2)</h4>
                 {showPresetPromptCollapse ? <ChevronUp size={16} color="#a5adce" /> : <ChevronDown size={16} color="#a5adce" />}
@@ -2110,8 +2177,8 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                       onClick={() => setSelectedLang('chinese')}
                       style={{
                         flex: 1, padding: '8px', borderRadius: '6px', border: 'none',
-                        backgroundColor: selectedLang === 'chinese' ? '#83c5be' : '#222822',
-                        color: selectedLang === 'chinese' ? '#11111b' : '#e2e4ed',
+                        backgroundColor: selectedLang === 'chinese' ? '#83c5be' : 'var(--border-main)',
+                        color: selectedLang === 'chinese' ? '#11111b' : 'var(--text-main)',
                         fontWeight: 'bold', cursor: 'pointer', fontSize: '12px'
                       }}
                     >
@@ -2121,8 +2188,8 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                       onClick={() => setSelectedLang('japanese')}
                       style={{
                         flex: 1, padding: '8px', borderRadius: '6px', border: 'none',
-                        backgroundColor: selectedLang === 'japanese' ? '#83c5be' : '#222822',
-                        color: selectedLang === 'japanese' ? '#11111b' : '#e2e4ed',
+                        backgroundColor: selectedLang === 'japanese' ? '#83c5be' : 'var(--border-main)',
+                        color: selectedLang === 'japanese' ? '#11111b' : 'var(--text-main)',
                         fontWeight: 'bold', cursor: 'pointer', fontSize: '12px'
                       }}
                     >
@@ -2132,26 +2199,26 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
 
                   {/* 현재 등록된 프리셋 리스트 - 클릭 시 하단 폼에 내용 로드 */}
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    <label style={{ fontSize: '12px', color: '#a5adce' }}>현재 등록된 추가 프리셋 (클릭하면 수정)</label>
+                    <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>현재 등록된 추가 프리셋 (클릭하면 수정)</label>
                     {Object.keys(currentPresets).map(presetId => (
                       <div
                         key={presetId}
                         onClick={() => handleLoadPresetToForm(presetId)}
                         style={{
                           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                          backgroundColor: editingPresetId === presetId ? '#1a2a1a' : '#222822',
+                          backgroundColor: editingPresetId === presetId ? '#1a2a1a' : 'var(--border-main)',
                           border: editingPresetId === presetId ? '1px solid #81c784' : '1px solid transparent',
                           borderRadius: '8px', padding: '8px 12px',
                           cursor: presetId !== 'default' ? 'pointer' : 'default'
                         }}
                       >
-                        <span style={{ fontSize: '13px', flex: 1, color: editingPresetId === presetId ? '#81c784' : '#e2e4ed' }}>
+                        <span style={{ fontSize: '13px', flex: 1, color: editingPresetId === presetId ? 'var(--primary)' : 'var(--text-main)' }}>
                           {currentPresets[presetId].name}
                         </span>
                         {presetId !== 'default' && (
                           <button
                             onClick={(e) => { e.stopPropagation(); handleDeletePreset(presetId); }}
-                            style={{ background: 'none', border: 'none', color: '#e78284', cursor: 'pointer', fontSize: '11px', padding: '2px 6px' }}
+                            style={{ background: 'none', border: 'none', color: 'var(--danger)', cursor: 'pointer', fontSize: '11px', padding: '2px 6px' }}
                           >
                             삭제
                           </button>
@@ -2163,7 +2230,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                   {/* 신규 등록 / 수정 폼 */}
                   <div style={{ borderTop: '1px solid #222822', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <label style={{ fontSize: '12px', color: editingPresetId ? '#81c784' : '#a5adce' }}>
+                      <label style={{ fontSize: '12px', color: editingPresetId ? 'var(--primary)' : 'var(--text-muted)' }}>
                         {editingPresetId ? '프리셋 수정 중 — 이름/내용 변경 후 저장' : '새 지침 추가'}
                       </label>
                       <button onClick={() => openPresetModal('newPresetContent', newPresetContent)} style={{ background: 'none', border: 'none', color: '#83c5be', cursor: 'pointer', fontSize: '16px', padding: '0 4px', lineHeight: '1' }} title="전체화면 편집">
@@ -2175,9 +2242,9 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                       value={newPresetName}
                       onChange={(e) => setNewPresetName(e.target.value)}
                       style={{
-                        backgroundColor: '#222822',
+                        backgroundColor: 'var(--border-main)',
                         border: editingPresetId ? '1px solid #81c784' : 'none',
-                        borderRadius: '6px', padding: '8px', color: '#e2e4ed', fontSize: '12px'
+                        borderRadius: '6px', padding: '8px', color: 'var(--text-main)', fontSize: '12px'
                       }}
                     />
                     <textarea
@@ -2186,16 +2253,16 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                       value={newPresetContent}
                       onChange={(e) => setNewPresetContent(e.target.value)}
                       style={{
-                        backgroundColor: '#222822',
+                        backgroundColor: 'var(--border-main)',
                         border: editingPresetId ? '1px solid #81c784' : 'none',
-                        borderRadius: '6px', padding: '8px', color: '#e2e4ed', fontSize: '12px'
+                        borderRadius: '6px', padding: '8px', color: 'var(--text-main)', fontSize: '12px'
                       }}
                     />
                     <div style={{ display: 'flex', gap: '8px' }}>
                       {editingPresetId && (
                         <button
                           onClick={() => { setEditingPresetId(null); setNewPresetName(''); setNewPresetContent(''); }}
-                          style={{ flex: 1, backgroundColor: '#333', border: 'none', borderRadius: '8px', padding: '10px', color: '#e2e4ed', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' }}
+                          style={{ flex: 1, backgroundColor: 'var(--border-main)', border: 'none', borderRadius: '8px', padding: '10px', color: 'var(--text-main)', fontWeight: 'bold', cursor: 'pointer', fontSize: '12px' }}
                         >
                           취소
                         </button>
@@ -2217,12 +2284,12 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
             {/* colomo.dev 연동 리더기 커스텀 대시보드 */}
 
             {/* 아코디언 1: 테마 설정 */}
-            <div style={{ backgroundColor: '#111311', borderRadius: '14px', border: '1px solid #222822', overflow: 'hidden' }}>
+            <div style={{ backgroundColor: 'var(--bg-main)', borderRadius: '14px', border: '1px solid #222822', overflow: 'hidden' }}>
               <div
                 onClick={() => setShowThemeCollapse(!showThemeCollapse)}
                 style={{ padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', borderBottom: showThemeCollapse ? '1px solid #222822' : 'none' }}
               >
-                <h4 style={{ margin: 0, fontSize: '14px', color: '#a6d189', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <h4 style={{ margin: 0, fontSize: '14px', color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   ▼ 테마 설정
                 </h4>
                 {showThemeCollapse ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
@@ -2235,11 +2302,11 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', borderBottom: '1px solid #222822', paddingBottom: '12px', marginBottom: '4px' }}>
                     <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                       {Object.keys(themePresets).map(presetName => (
-                        <div key={presetName} style={{ display: 'flex', alignItems: 'center', backgroundColor: '#222822', borderRadius: '6px', overflow: 'hidden' }}>
-                          <button onClick={() => handleLoadThemePreset(presetName)} style={{ background: 'none', border: 'none', color: '#81c784', padding: '6px 10px', fontSize: '12px', cursor: 'pointer' }}>
+                        <div key={presetName} style={{ display: 'flex', alignItems: 'center', backgroundColor: 'var(--border-main)', borderRadius: '6px', overflow: 'hidden' }}>
+                          <button onClick={() => handleLoadThemePreset(presetName)} style={{ background: 'none', border: 'none', color: 'var(--primary)', padding: '6px 10px', fontSize: '12px', cursor: 'pointer' }}>
                             {presetName}
                           </button>
-                          <button onClick={(e) => handleDeleteThemePreset(presetName, e)} style={{ background: '#3d2525', border: 'none', color: '#e78284', padding: '6px 8px', fontSize: '11px', cursor: 'pointer' }}>
+                          <button onClick={(e) => handleDeleteThemePreset(presetName, e)} style={{ background: '#3d2525', border: 'none', color: 'var(--danger)', padding: '6px 8px', fontSize: '11px', cursor: 'pointer' }}>
                             X
                           </button>
                         </div>
@@ -2249,9 +2316,9 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                       <input
                         type="text" value={newThemePresetName} onChange={(e) => setNewThemePresetName(e.target.value)}
                         placeholder="현재 테마 저장 (이름 입력)"
-                        style={{ flex: 1, backgroundColor: '#222822', border: 'none', borderRadius: '6px', padding: '8px', color: '#e2e4ed', fontSize: '12px' }}
+                        style={{ flex: 1, backgroundColor: 'var(--border-main)', border: 'none', borderRadius: '6px', padding: '8px', color: 'var(--text-main)', fontSize: '12px' }}
                       />
-                      <button onClick={handleSaveThemePreset} style={{ backgroundColor: '#81c784', border: 'none', borderRadius: '6px', padding: '6px 12px', color: '#11111b', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer' }}>
+                      <button onClick={handleSaveThemePreset} style={{ backgroundColor: 'var(--primary)', border: 'none', borderRadius: '6px', padding: '6px 12px', color: '#11111b', fontWeight: 'bold', fontSize: '12px', cursor: 'pointer' }}>
                         저장
                       </button>
                     </div>
@@ -2260,79 +2327,79 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                   {/* 인풋 스타일 컨트롤 Grid */}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '10px' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <label style={{ fontSize: '11px', color: '#a5adce' }}>폰트 종류 (css)</label>
+                      <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>폰트 종류 (css)</label>
                       <input
                         type="text" value={readerSettings.fontFamily}
                         onChange={(e) => handleUpdateReaderSetting('fontFamily', e.target.value)}
-                        style={{ backgroundColor: '#222822', border: 'none', borderRadius: '6px', padding: '6px', color: '#e2e4ed' }}
+                        style={{ backgroundColor: 'var(--border-main)', border: 'none', borderRadius: '6px', padding: '6px', color: 'var(--text-main)' }}
                       />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <label style={{ fontSize: '11px', color: '#a5adce' }}>글자 색상</label>
+                      <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>글자 색상</label>
                       <input
                         type="text" value={readerSettings.fontColor}
                         onChange={(e) => handleUpdateReaderSetting('fontColor', e.target.value)}
-                        style={{ backgroundColor: '#222822', border: 'none', borderRadius: '6px', padding: '6px', color: '#e2e4ed' }}
+                        style={{ backgroundColor: 'var(--border-main)', border: 'none', borderRadius: '6px', padding: '6px', color: 'var(--text-main)' }}
                       />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <label style={{ fontSize: '11px', color: '#a5adce' }}>배경 색상</label>
+                      <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>배경 색상</label>
                       <input
                         type="text" value={readerSettings.bgColor}
                         onChange={(e) => handleUpdateReaderSetting('bgColor', e.target.value)}
-                        style={{ backgroundColor: '#222822', border: 'none', borderRadius: '6px', padding: '6px', color: '#e2e4ed' }}
+                        style={{ backgroundColor: 'var(--border-main)', border: 'none', borderRadius: '6px', padding: '6px', color: 'var(--text-main)' }}
                       />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <label style={{ fontSize: '11px', color: '#aab0a6' }}>글자 크기 (px)</label>
+                      <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>글자 크기 (px)</label>
                       <input
                         type="number" value={readerSettings.fontSize}
                         onChange={(e) => handleUpdateReaderSetting('fontSize', e.target.value === '' ? '' : (parseInt(e.target.value) || 0))}
-                        style={{ backgroundColor: '#222822', border: 'none', borderRadius: '6px', padding: '6px', color: '#e2e4ed' }}
+                        style={{ backgroundColor: 'var(--border-main)', border: 'none', borderRadius: '6px', padding: '6px', color: 'var(--text-main)' }}
                       />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <label style={{ fontSize: '11px', color: '#aab0a6' }}>글자 두께 (weight)</label>
+                      <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>글자 두께 (weight)</label>
                       <input
                         type="number" step="100" min="100" max="900" value={readerSettings.fontWeight}
                         onChange={(e) => handleUpdateReaderSetting('fontWeight', e.target.value === '' ? '' : (parseInt(e.target.value) || 0))}
-                        style={{ backgroundColor: '#222822', border: 'none', borderRadius: '6px', padding: '6px', color: '#e2e4ed' }}
+                        style={{ backgroundColor: 'var(--border-main)', border: 'none', borderRadius: '6px', padding: '6px', color: 'var(--text-main)' }}
                       />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <label style={{ fontSize: '11px', color: '#aab0a6' }}>좌우 간격 (px)</label>
+                      <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>좌우 간격 (px)</label>
                       <input
                         type="number" value={readerSettings.paddingX}
                         onChange={(e) => handleUpdateReaderSetting('paddingX', e.target.value === '' ? '' : (parseInt(e.target.value) || 0))}
-                        style={{ backgroundColor: '#222822', border: 'none', borderRadius: '6px', padding: '6px', color: '#e2e4ed' }}
+                        style={{ backgroundColor: 'var(--border-main)', border: 'none', borderRadius: '6px', padding: '6px', color: 'var(--text-main)' }}
                       />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <label style={{ fontSize: '11px', color: '#aab0a6' }}>줄간격 (line-height)</label>
+                      <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>줄간격 (line-height)</label>
                       <input
                         type="number" step="0.1" value={readerSettings.lineHeight}
                         onChange={(e) => handleUpdateReaderSetting('lineHeight', e.target.value === '' ? '' : (parseFloat(e.target.value) || 0))}
-                        style={{ backgroundColor: '#222822', border: 'none', borderRadius: '6px', padding: '6px', color: '#e2e4ed' }}
+                        style={{ backgroundColor: 'var(--border-main)', border: 'none', borderRadius: '6px', padding: '6px', color: 'var(--text-main)' }}
                       />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <label style={{ fontSize: '11px', color: '#aab0a6' }}>문장 간격 (margin, px)</label>
+                      <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>문장 간격 (margin, px)</label>
                       <input
                         type="number" value={readerSettings.paragraphGap}
                         onChange={(e) => handleUpdateReaderSetting('paragraphGap', e.target.value === '' ? '' : (parseInt(e.target.value) || 0))}
-                        style={{ backgroundColor: '#222822', border: 'none', borderRadius: '6px', padding: '6px', color: '#e2e4ed' }}
+                        style={{ backgroundColor: 'var(--border-main)', border: 'none', borderRadius: '6px', padding: '6px', color: 'var(--text-main)' }}
                       />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <label style={{ fontSize: '11px', color: '#aab0a6' }}>들여쓰기 (em)</label>
+                      <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>들여쓰기 (em)</label>
                       <input
                         type="number" step="0.5" value={readerSettings.textIndent}
                         onChange={(e) => handleUpdateReaderSetting('textIndent', e.target.value === '' ? '' : (parseFloat(e.target.value) || 0))}
-                        style={{ backgroundColor: '#222822', border: 'none', borderRadius: '6px', padding: '6px', color: '#e2e4ed' }}
+                        style={{ backgroundColor: 'var(--border-main)', border: 'none', borderRadius: '6px', padding: '6px', color: 'var(--text-main)' }}
                       />
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                      <label style={{ fontSize: '11px', color: '#aab0a6' }}>원문 투명도 (0~100 %)</label>
+                      <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>원문 투명도 (0~100 %)</label>
                       <input
                         type="number" min="0" max="100" value={readerSettings.opacity}
                         onChange={(e) => {
@@ -2347,7 +2414,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                             handleUpdateReaderSetting('opacity', val);
                           }
                         }}
-                        style={{ backgroundColor: '#222822', border: 'none', borderRadius: '6px', padding: '6px', color: '#e2e4ed', fontSize: '13px' }}
+                        style={{ backgroundColor: 'var(--border-main)', border: 'none', borderRadius: '6px', padding: '6px', color: 'var(--text-main)', fontSize: '13px' }}
                       />
                     </div>
                   </div>
@@ -2377,12 +2444,12 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
             </div>
 
             {/* 아코디언 2: 기타 설정 */}
-            <div style={{ backgroundColor: '#121212', borderRadius: '14px', border: '1px solid #252630', overflow: 'hidden' }}>
+            <div style={{ backgroundColor: 'var(--bg-card)', borderRadius: '14px', border: '1px solid #252630', overflow: 'hidden' }}>
               <div
                 onClick={() => setShowMiscCollapse(!showMiscCollapse)}
                 style={{ padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', borderBottom: showMiscCollapse ? '1px solid #252630' : 'none' }}
               >
-                <h4 style={{ margin: 0, fontSize: '14px', color: '#e5c07b', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <h4 style={{ margin: 0, fontSize: '14px', color: 'var(--accent2)', display: 'flex', alignItems: 'center', gap: '6px' }}>
                   ▼ 기타 설정
                 </h4>
                 {showMiscCollapse ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
@@ -2435,8 +2502,8 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
             </div>
 
             {/* 보관함 통계 및 클리너 */}
-            <div style={{ backgroundColor: '#121212', padding: '16px', borderRadius: '14px', border: '1px solid #252630', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <h4 style={{ margin: 0, fontSize: '14px', color: '#e78284' }}>💾 보관함 캐시 용량 최적화</h4>
+            <div style={{ backgroundColor: 'var(--bg-card)', padding: '16px', borderRadius: '14px', border: '1px solid #252630', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <h4 style={{ margin: 0, fontSize: '14px', color: 'var(--danger)' }}>💾 보관함 캐시 용량 최적화</h4>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '12px', color: '#bac2de' }}>
                 <div>보관 소설 수: {cacheStats.totalNovels}개</div>
                 <div>캐시된 화수: {cacheStats.totalCachedEpisodes}개</div>
@@ -2444,7 +2511,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
               <button
                 onClick={handleClearCache}
                 style={{
-                  backgroundColor: '#252630', border: 'none', color: '#e78284', borderRadius: '8px', padding: '10px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', marginTop: '4px'
+                  backgroundColor: 'var(--bg-panel)', border: 'none', color: 'var(--danger)', borderRadius: '8px', padding: '10px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', marginTop: '4px'
                 }}
               >
                 오래된 캐시 일괄 삭제 (최근 30일 미열람 분량)
@@ -2452,22 +2519,22 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
             </div>
 
             {/* 보관함 데이터 백업 및 복원 (도메인 이전용) */}
-            <div style={{ backgroundColor: '#121212', padding: '16px', borderRadius: '14px', border: '1px solid #252630', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <h4 style={{ margin: 0, fontSize: '14px', color: '#81c784' }}>이관용 보관함 백업 및 복원</h4>
-              <p style={{ margin: 0, fontSize: '11px', color: '#a5adce', lineHeight: '1.4' }}>
+            <div style={{ backgroundColor: 'var(--bg-card)', padding: '16px', borderRadius: '14px', border: '1px solid #252630', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <h4 style={{ margin: 0, fontSize: '14px', color: 'var(--primary)' }}>이관용 보관함 백업 및 복원</h4>
+              <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-muted)', lineHeight: '1.4' }}>
                 도메인이 바뀌어 보관함이 비어 보일 때 사용합니다. 구 도메인 앱에서 백업 파일을 다운로드받은 뒤, 새 도메인 앱에서 불러오기 하세요.
               </p>
               <button
                 onClick={handleBackupDownload}
                 style={{
-                  backgroundColor: '#81c784', border: 'none', color: '#11111b', borderRadius: '8px', padding: '10px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer'
+                  backgroundColor: 'var(--primary)', border: 'none', color: '#11111b', borderRadius: '8px', padding: '10px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer'
                 }}
               >
                 현재 보관함 전체 백업 파일 다운로드
               </button>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '6px', borderTop: '1px solid #252630', paddingTop: '10px' }}>
-                <label style={{ fontSize: '12px', color: '#a5adce' }}>백업 파일 불러오기 및 복원</label>
+                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>백업 파일 불러오기 및 복원</label>
                 <input
                   type="file"
                   accept=".json"
@@ -2492,20 +2559,20 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
           display: 'flex', flexDirection: 'column', padding: '20px', boxSizing: 'border-box'
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-            <h3 style={{ margin: 0, color: '#e2e4ed', fontSize: '18px' }}>프롬프트 전체화면 편집</h3>
-            <button onClick={() => setShowPresetModal(false)} style={{ background: 'none', border: 'none', color: '#e78284', fontSize: '24px', cursor: 'pointer', lineHeight: '1' }}>×</button>
+            <h3 style={{ margin: 0, color: 'var(--text-main)', fontSize: '18px' }}>프롬프트 전체화면 편집</h3>
+            <button onClick={() => setShowPresetModal(false)} style={{ background: 'none', border: 'none', color: 'var(--danger)', fontSize: '24px', cursor: 'pointer', lineHeight: '1' }}>×</button>
           </div>
           <textarea
             value={modalPresetValue}
             onChange={(e) => setModalPresetValue(e.target.value)}
             style={{
-              flex: 1, backgroundColor: '#222822', border: '1px solid #81c784', borderRadius: '12px',
-              padding: '16px', color: '#e2e4ed', fontSize: '14px', fontFamily: 'monospace', resize: 'none',
+              flex: 1, backgroundColor: 'var(--border-main)', border: '1px solid #81c784', borderRadius: '12px',
+              padding: '16px', color: 'var(--text-main)', fontSize: '14px', fontFamily: 'monospace', resize: 'none',
               lineHeight: '1.6'
             }}
           />
           <div style={{ display: 'flex', gap: '12px', marginTop: '16px' }}>
-            <button onClick={() => setShowPresetModal(false)} style={{ flex: 1, backgroundColor: '#252630', border: 'none', color: '#e2e4ed', padding: '14px', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px' }}>취소</button>
+            <button onClick={() => setShowPresetModal(false)} style={{ flex: 1, backgroundColor: 'var(--bg-panel)', border: 'none', color: 'var(--text-main)', padding: '14px', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px' }}>취소</button>
             <button onClick={handleSaveModalPreset} style={{ flex: 2, background: 'linear-gradient(135deg, #81c784, #83c5be)', border: 'none', color: '#11111b', padding: '14px', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px' }}>적용 및 닫기</button>
           </div>
         </div>
@@ -2515,7 +2582,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
       <footer style={{
         display: 'flex',
         borderTop: '1px solid #222822',
-        backgroundColor: '#111311',
+        backgroundColor: 'var(--bg-main)',
         padding: '10px 0',
         position: 'sticky',
         bottom: 0,
@@ -2546,7 +2613,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                 gap: '4px',
                 background: 'none',
                 border: 'none',
-                color: isActive ? '#81c784' : '#a5adce',
+                color: isActive ? 'var(--primary)' : 'var(--text-muted)',
                 cursor: 'pointer',
                 fontSize: '12px',
                 fontWeight: isActive ? 'bold' : 'normal'
@@ -2558,6 +2625,30 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
           );
         })}
       </footer>
+
+      {/* 토스트(Toast) 메시지 UI */}
+      {toastMessage && (
+        <div style={{
+          position: 'fixed',
+          bottom: '80px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          backgroundColor: 'rgba(0,0,0,0.8)',
+          color: 'white',
+          padding: '12px 24px',
+          borderRadius: '24px',
+          fontSize: '14px',
+          fontWeight: 'bold',
+          zIndex: 9999,
+          pointerEvents: 'none',
+          boxShadow: '0 4px 6px rgba(0,0,0,0.3)',
+          transition: 'opacity 0.3s ease-in-out',
+          textAlign: 'center',
+          whiteSpace: 'nowrap'
+        }}>
+          {toastMessage}
+        </div>
+      )}
     </div>
   );
 }

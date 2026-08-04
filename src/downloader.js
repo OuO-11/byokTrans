@@ -72,19 +72,13 @@ export async function downloadCachedEpisodes(novelId, novelTitle, site) {
         if (Capacitor.isNativePlatform()) {
           // [네이티브 앱 환경 (Android/iOS)]
           const result = await Filesystem.writeFile({
-            path: fileName,
+            path: `Download/${fileName}`,
             data: mergedText,
-            directory: Directory.Cache,
+            directory: Directory.ExternalStorage,
             encoding: 'utf8'
           });
 
-          // Share 시트를 띄워 사용자가 '다운로드' 폴더 등에 명시적으로 저장할 수 있게 유도
-          await Share.share({
-            title: fileName,
-            url: result.uri,
-            dialogTitle: '파일 저장하기'
-          });
-          
+          alert('다운로드 폴더에 저장 완료되었습니다.\n' + result.uri);
           resolve(fileName);
         } else {
           // [웹 브라우저 (PWA) 환경]
