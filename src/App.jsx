@@ -10,6 +10,7 @@ import { getApiKeys, saveApiKeys, getActiveApiKey, fetchAvailableModels, transla
 import { getPromptsTree, savePreset, deletePreset, getPromptContent } from './promptManager.js';
 import { translateFullPage, extractNovelContent } from './parser.js';
 import { downloadCachedEpisodes } from './downloader.js';
+import { extractCoreTextNodes, applyTranslationsToDOM } from './utils/domTranslator.js';
 import darkReaderCodeRawString from './plugins/darkreader.js?raw';
 
 
@@ -606,35 +607,9 @@ function App() {
 
   // [39단계/54단계 핵심: iframe 문서 내 텍스트 노드 실시간 번역 교체 함수 (비구씨/콜로모 방식)]
   const translateIframeDocument = async (iframeDoc, systemPrompt, model, sessionId, url) => {
-    const EXCLUDE_TAGS = ['SCRIPT', 'STYLE', 'LINK', 'META', 'HEAD', 'NOSCRIPT', 'TEMPLATE'];
-    const textNodes = [];
+    const { promptString, nodeMap, totalUniqueNodes } = extractCoreTextNodes(iframeDoc);
 
-    // DOM 트리를 재귀적으로 순회하며 번역할 텍스트 노드 수집
-    function walk(node) {
-      if (node.nodeType === Node.ELEMENT_NODE && EXCLUDE_TAGS.includes(node.tagName)) {
-        return;
-      }
-      if (node.nodeType === Node.TEXT_NODE) {
-        const text = node.nodeValue.trim();
-        if (text.length > 0 && isNaN(text)) { // 순수 숫자 제외
-          textNodes.push(node);
-        }
-      }
-      let child = node.firstChild;
-      while (child) {
-        walk(child);
-        child = child.nextSibling;
-      }
-    }
-
-    try {
-      walk(iframeDoc.body || iframeDoc);
-    } catch (e) {
-      console.warn("DOM walk failed:", e);
-    }
-
-    const totalNodes = textNodes.length;
-    if (totalNodes === 0) {
+    if (totalUniqueNodes === 0) {
       if (translationSessionIdRef.current === sessionId) {
         setIsTranslating(false);
         setTransProgress(100);
@@ -642,10 +617,7 @@ function App() {
       return;
     }
 
-    console.log(`[Iframe Real-time Translator] Found ${totalNodes} text nodes to translate.`);
-
-    const BATCH_SIZE = 15;
-    let translatedCount = 0;
+    console.log(`[Iframe Real-time Translator] Extracted ${totalUniqueNodes} unique paragraphs for translation.`);
 
     const colomoSystemPrompt = `[공리]
 입력: 원문 섹션이 주어짐. 번역 섹션이 함께 주어질 수도 있으며, 기존 번역문이므로 그 다음 줄부터 마저 번역.
@@ -668,98 +640,52 @@ function App() {
         translationAbortControllerRef.current = new AbortController();
     }
     
-    let translatedList = new Array(totalNodes).fill('');
-    let doneTranslation = false;
-    let continuationCount = 0;
-    const maxContinuationAttempts = 4;
+    const handleStreamChunk = (fullAiTextBuffer) => {
+        if (translationSessionIdRef.current !== sessionId) return;
 
-    while (!doneTranslation && continuationCount < maxContinuationAttempts) {
-        if (translationSessionIdRef.current !== sessionId) break;
-
-        const pendingIndices = [];
-        for (let i = 0; i < totalNodes; i++) {
-            if (translatedList[i] === '' || translatedList[i] === undefined) {
-                pendingIndices.push(i);
+        const updatedCount = applyTranslationsToDOM(nodeMap, fullAiTextBuffer);
+        
+        if (updatedCount > 0) {
+            const remainingCount = Object.keys(nodeMap).length;
+            const completedCount = totalUniqueNodes - remainingCount;
+            const progressPercent = Math.min(Math.round((completedCount / totalUniqueNodes) * 100), 99);
+            setTransProgress(progressPercent);
+        }
+    };
+    
+    try {
+        await translateTextStreamWithRotation(
+            `<main id="원문">\n${promptString}\n</main>`,
+            finalSystemPrompt,
+            model,
+            handleStreamChunk,
+            translationAbortControllerRef.current.signal,
+            '<main id="번역">\n'
+        );
+        
+        if (translationSessionIdRef.current === sessionId) {
+            setTransProgress(100);
+            setIsTranslating(false);
+            console.log(`[Iframe Real-time Translator] Finished translating ${totalUniqueNodes} nodes.`);
+            try {
+                // [54단계] 완성된 번역 HTML을 메모리 캐시에 저장
+                pageCacheRef.current[url] = iframeDoc.documentElement.outerHTML;
+            } catch (e) {
+                console.warn('Failed to cache page HTML:', e);
             }
         }
-
-        if (pendingIndices.length === 0) {
-            doneTranslation = true;
-            break;
+    } catch (e) {
+        console.warn(`[Iframe Streaming Failed]:`, e);
+        if (cancelTranslationRef.current || e.message?.includes('중단') || e.name === 'AbortError') {
+            // Cancelled
+        } else if (e.message?.includes('ALL_KEYS_EXHAUSTED')) {
+            alert(`[API 할당량 소진] 모든 API Key의 무료 제공량이 초과되었습니다.\n잠시 후 다시 시도해 주세요.`);
+        } else {
+            alert(`[오류] 번역 중 문제가 발생했습니다.\n사유: ${e.message}`);
         }
-
-        console.log(`[Iframe Continuation #${continuationCount + 1}] Processing ${pendingIndices.length} pending nodes...`);
-
-        const pendingRawText = pendingIndices.map(idx => `<p id="${idx}">${textNodes[idx].nodeValue.trim()}</p>`).join('\n');
-        
-        const handleStreamChunk = (fullAiTextBuffer) => {
-            if (translationSessionIdRef.current !== sessionId) return;
-
-            const chunksByTag = fullAiTextBuffer.split(/<p id="(\d+)">/);
-            let updatedCount = 0;
-            
-            for (let i = 1; i < chunksByTag.length; i += 2) {
-                const idx = parseInt(chunksByTag[i]);
-                let text = chunksByTag[i + 1] || '';
-                text = text.replace(/<\/p>[\s\S]*$/, '').trim();
-                
-                if (pendingIndices.includes(idx) && translatedList[idx] !== text) {
-                    translatedList[idx] = text;
-                    textNodes[idx].nodeValue = text;
-                    updatedCount++;
-                }
-            }
-            
-            if (updatedCount > 0) {
-                const completedCount = translatedList.filter(t => t !== '').length;
-                const progressPercent = Math.min(Math.round((completedCount / totalNodes) * 100), 99);
-                setTransProgress(progressPercent);
-            }
-        };
-        
-        try {
-            await translateTextStreamWithRotation(
-                `<main id="원문">\n${pendingRawText}\n</main>`,
-                finalSystemPrompt,
-                model,
-                handleStreamChunk,
-                translationAbortControllerRef.current.signal,
-                '<main id="번역">\n'
-            );
-        } catch (e) {
-            console.warn(`[Iframe Streaming Attempt ${continuationCount + 1} Failed]:`, e);
-            if (cancelTranslationRef.current || e.message?.includes('중단') || e.name === 'AbortError') {
-                break;
-            }
-            if (e.message?.includes('ALL_KEYS_EXHAUSTED')) {
-                alert(`[API 할당량 소진] 모든 API Key의 무료 제공량이 초과되었습니다.\n잠시 후 다시 시도해 주세요.`);
-                break;
-            } else if (e.message?.includes('status: 400') || e.message?.includes('[NON_RETRIABLE_SAFETY]')) {
-                // Safety filter hit, give up on the first pending node and continue
-                if (pendingIndices.length > 0) {
-                    translatedList[pendingIndices[0]] = `[번역 불가] ${textNodes[pendingIndices[0]].nodeValue}`;
-                }
-            } else {
-                if (continuationCount === maxContinuationAttempts - 1) {
-                    alert(`[네트워크 오류] 일시적인 서버 불안정으로 일부 웹페이지 번역이 누락되었습니다.\n사유: ${e.message}`);
-                } else {
-                    await new Promise(r => setTimeout(r, 2500));
-                }
-            }
+        if (translationSessionIdRef.current === sessionId) {
+            setIsTranslating(false);
         }
-        
-        continuationCount++;
-    }
-
-    if (translationSessionIdRef.current === sessionId) {
-      setTransProgress(100);
-      setIsTranslating(false);
-      try {
-        // [54단계] 완성된 번역 HTML을 메모리 캐시에 저장
-        pageCacheRef.current[url] = iframeDoc.documentElement.outerHTML;
-      } catch (e) {
-        console.warn('Failed to cache page HTML:', e);
-      }
     }
   };
 
