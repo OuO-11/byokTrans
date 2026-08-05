@@ -2,23 +2,28 @@
  * 사용자가 입력한 API 키 목록을 가져옵니다.
  */
 export function getApiKeys() {
-  const keysStr = localStorage.getItem('noveltrans_api_keys') || '';
-  return keysStr.split('\n').map(k => k.trim()).filter(k => k.length > 0);
+  const keysStr = localStorage.getItem("noveltrans_api_keys") || "";
+  return keysStr
+    .split("\n")
+    .map((k) => k.trim())
+    .filter((k) => k.length > 0);
 }
 
 /**
  * API 키 목록을 영구 저장합니다.
  */
 export function saveApiKeys(keysArray) {
-  const keysStr = keysArray.join('\n');
-  localStorage.setItem('noveltrans_api_keys', keysStr);
+  const keysStr = keysArray.join("\n");
+  localStorage.setItem("noveltrans_api_keys", keysStr);
 }
 
 /**
  * 현재 사용 중인 API 키 인덱스를 가져옵니다.
  */
 function getActiveKeyIndex() {
-  const idx = parseInt(localStorage.getItem('noveltrans_active_key_idx') || '0');
+  const idx = parseInt(
+    localStorage.getItem("noveltrans_active_key_idx") || "0",
+  );
   const keys = getApiKeys();
   if (idx >= keys.length) return 0;
   return idx;
@@ -28,7 +33,7 @@ function getActiveKeyIndex() {
  * 사용 중인 API 키 인덱스를 저장합니다.
  */
 function setActiveKeyIndex(index) {
-  localStorage.setItem('noveltrans_active_key_idx', index.toString());
+  localStorage.setItem("noveltrans_active_key_idx", index.toString());
 }
 
 /**
@@ -41,7 +46,9 @@ export function rotateApiKey() {
   const currentIdx = getActiveKeyIndex();
   const nextIdx = (currentIdx + 1) % keys.length;
   setActiveKeyIndex(nextIdx);
-  console.warn(`[API Key Rotated] Switched key index from ${currentIdx} to ${nextIdx}`);
+  console.warn(
+    `[API Key Rotated] Switched key index from ${currentIdx} to ${nextIdx}`,
+  );
   return keys[nextIdx];
 }
 
@@ -64,27 +71,28 @@ export async function fetchAvailableModels(apiKey) {
 
   try {
     const res = await fetch(url);
-    if (!res.ok) throw new Error('모델 목록을 조회하지 못했습니다.');
+    if (!res.ok) throw new Error("모델 목록을 조회하지 못했습니다.");
     const data = await res.json();
-    
+
     if (!data.models) return [];
 
     // 1. generateContent 지원 및 2. 무료 Tier 성격인 flash/lite 모델만 화이트리스트 필터링
     const filtered = data.models
-      .filter(m => {
+      .filter((m) => {
         const name = m.name.toLowerCase();
-        const supportsGen = m.supportedGenerationMethods?.includes('generateContent');
-        const isFreeTier = name.includes('flash') || name.includes('lite');
+        const supportsGen =
+          m.supportedGenerationMethods?.includes("generateContent");
+        const isFreeTier = name.includes("flash") || name.includes("lite");
         return supportsGen && isFreeTier;
       })
-      .map(m => {
+      .map((m) => {
         // 'models/gemini-3.1-flash-lite' 형식에서 'models/' 접두어 떼기 (선택창 가시성을 위함)
-        return m.name.replace(/^models\//, '');
+        return m.name.replace(/^models\//, "");
       });
 
     return filtered;
   } catch (err) {
-    console.error('[fetchAvailableModels Error] Fallback to cache:', err);
+    console.error("[fetchAvailableModels Error] Fallback to cache:", err);
     return [];
   }
 }
@@ -95,10 +103,16 @@ export async function fetchAvailableModels(apiKey) {
  * @param {string} systemInstruction 번역에 적용할 상세 프롬프트 (시스템 지시어)
  * @param {string} model 사용할 Gemini 모델명 (예: gemini-3.1-flash-lite)
  */
-export async function translateTextWithRotation(textToTranslate, systemInstruction, model = 'gemini-1.5-flash') {
+export async function translateTextWithRotation(
+  textToTranslate,
+  systemInstruction,
+  model = "gemini-1.5-flash",
+) {
   const keys = getApiKeys();
   if (keys.length === 0) {
-    throw new Error('API Key가 등록되어 있지 않습니다. 설정에서 키를 먼저 입력해 주세요.');
+    throw new Error(
+      "API Key가 등록되어 있지 않습니다. 설정에서 키를 먼저 입력해 주세요.",
+    );
   }
 
   // 등록된 API 키의 개수만큼 로테이션하며 재시도 수행
@@ -108,67 +122,70 @@ export async function translateTextWithRotation(textToTranslate, systemInstructi
   while (attempts < maxAttempts) {
     const apiKey = getActiveApiKey();
     if (!apiKey) {
-      throw new Error('유효한 API Key를 찾을 수 없습니다.');
+      throw new Error("유효한 API Key를 찾을 수 없습니다.");
     }
 
-    const cleanedModelName = model.startsWith('models/') ? model : `models/${model}`;
+    const cleanedModelName = model.startsWith("models/")
+      ? model
+      : `models/${model}`;
     const url = `https://generativelanguage.googleapis.com/v1beta/${cleanedModelName}:generateContent?key=${apiKey}`;
 
     const requestBody = {
       contents: [
         {
-          parts: [
-            { text: textToTranslate }
-          ]
-        }
+          parts: [{ text: textToTranslate }],
+        },
       ],
       systemInstruction: {
-        parts: [
-          { text: systemInstruction }
-        ]
+        parts: [{ text: systemInstruction }],
       },
       generationConfig: {
         temperature: 0.8,
-        topP: 0.8
+        topP: 0.8,
       },
       safetySettings: [
         {
           category: "HARM_CATEGORY_HARASSMENT",
-          threshold: "BLOCK_NONE"
+          threshold: "BLOCK_NONE",
         },
         {
           category: "HARM_CATEGORY_HATE_SPEECH",
-          threshold: "BLOCK_NONE"
+          threshold: "BLOCK_NONE",
         },
         {
           category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-          threshold: "BLOCK_NONE"
+          threshold: "BLOCK_NONE",
         },
         {
           category: "HARM_CATEGORY_DANGEROUS_CONTENT",
-          threshold: "BLOCK_NONE"
-        }
-      ]
+          threshold: "BLOCK_NONE",
+        },
+      ],
     };
 
     try {
       const response = await fetch(url, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json'
+          "Content-Type": "application/json",
         },
-        body: JSON.stringify(requestBody)
+        body: JSON.stringify(requestBody),
       });
 
       const responseData = await response.json();
 
       // [57단계] 할당량 초과(429), 서버 에러(500대), 또는 인증 오류(403) 발생 시 키 로테이션 후 재시도
-      if (response.status === 429 || response.status >= 500 || (responseData.error && (
-        responseData.error.status === 'RESOURCE_EXHAUSTED' || 
-        responseData.error.message.includes('API key') ||
-        responseData.error.message.includes('Quota exceeded')
-      ))) {
-        console.warn(`[Gemini API Error] status=${response.status}, message=${responseData.error?.message}. Rotating key...`);
+      if (
+        response.status === 429 ||
+        response.status >= 500 ||
+        (responseData.error &&
+          (responseData.error.status === "RESOURCE_EXHAUSTED" ||
+            responseData.error.message.includes("API key") ||
+            responseData.error.message.includes("Quota exceeded")))
+      ) {
+        console.warn(
+          `[Gemini API Error] status=${response.status}, message=${responseData.error?.message}. Rotating key...`,
+        );
         rotateApiKey();
         attempts++;
         continue; // 다음 루프로 넘어가 새 키로 재시도
@@ -180,42 +197,56 @@ export async function translateTextWithRotation(textToTranslate, systemInstructi
       }
 
       // 2-1. 400 에러 (Safety / Prohibited Content) 등은 재시도해도 똑같으므로 즉시 중단 (API 증발 방지)
-      if (response.status === 400 || (responseData.error && responseData.error.message.includes('PROHIBITED'))) {
-        throw new Error(`[NON_RETRIABLE_SAFETY] 구글 안전망 필터에 의해 번역 차단됨: ${responseData.error?.message}`);
+      if (
+        response.status === 400 ||
+        (responseData.error &&
+          responseData.error.message.includes("PROHIBITED"))
+      ) {
+        throw new Error(
+          `[NON_RETRIABLE_SAFETY] 구글 안전망 필터에 의해 번역 차단됨: ${responseData.error?.message}`,
+        );
       }
 
       // 3. 기타 일반 오류 처리
       if (!response.ok || responseData.error) {
-        throw new Error(responseData.error?.message || `HTTP error! status: ${response.status}`);
+        throw new Error(
+          responseData.error?.message ||
+            `HTTP error! status: ${response.status}`,
+        );
       }
 
       // 4. 번역 결과 반환
-      const translatedText = responseData.candidates?.[0]?.content?.parts?.[0]?.text;
+      const translatedText =
+        responseData.candidates?.[0]?.content?.parts?.[0]?.text;
       if (!translatedText) {
-        throw new Error(`[NON_RETRIABLE_SAFETY] API 응답에 텍스트가 없습니다. (Safety 검열로 인한 차단 가능성)`);
+        throw new Error(
+          `[NON_RETRIABLE_SAFETY] API 응답에 텍스트가 없습니다. (Safety 검열로 인한 차단 가능성)`,
+        );
       }
 
       return translatedText;
-
     } catch (e) {
-      if (e.message === '사용자에 의해 번역이 강제 중단되었습니다.') throw e;
-      if (e.message.includes('[NON_RETRIABLE') || e.message.includes('[NON_RETRIABLE_SAFETY]')) {
+      if (e.message === "사용자에 의해 번역이 강제 중단되었습니다.") throw e;
+      if (
+        e.message.includes("[NON_RETRIABLE") ||
+        e.message.includes("[NON_RETRIABLE_SAFETY]")
+      ) {
         throw e; // 치명적/안전망 오류는 재시도 없이 즉시 상위로 던져서 무한루프 방지
       }
-      
-      if (e.message.includes('[RETRYABLE]')) {
+
+      if (e.message.includes("[RETRYABLE]")) {
         console.warn(`[Gemini API Error] ${e.message}. Rotating key...`);
         rotateApiKey();
         attempts++;
         continue;
       }
-      
+
       console.error(`[Gemini API Request Error] ${e.message}`);
       throw e; // 그 외 오류는 즉시 중단
     }
   }
 
-  throw new Error('ALL_KEYS_EXHAUSTED');
+  throw new Error("ALL_KEYS_EXHAUSTED");
 }
 
 /**
@@ -227,10 +258,19 @@ export async function translateTextWithRotation(textToTranslate, systemInstructi
  * @param {object} abortSignal 번역 중지 트리거용 AbortSignal
  * @param {string} assistantPrefill (선택) AI가 이어서 작성하도록 미리 던져주는 답변 프리필 (예: "<main>")
  */
-export async function translateTextStreamWithRotation(textToTranslate, systemInstruction, model = 'gemini-1.5-flash', onChunk, abortSignal, assistantPrefill = null) {
+export async function translateTextStreamWithRotation(
+  textToTranslate,
+  systemInstruction,
+  model = "gemini-1.5-flash",
+  onChunk,
+  abortSignal,
+  assistantPrefill = null,
+) {
   const keys = getApiKeys();
   if (keys.length === 0) {
-    throw new Error('API Key가 등록되어 있지 않습니다. 설정에서 키를 먼저 입력해 주세요.');
+    throw new Error(
+      "API Key가 등록되어 있지 않습니다. 설정에서 키를 먼저 입력해 주세요.",
+    );
   }
 
   let attempts = 0;
@@ -239,99 +279,113 @@ export async function translateTextStreamWithRotation(textToTranslate, systemIns
   while (attempts < maxAttempts) {
     const apiKey = getActiveApiKey();
     if (!apiKey) {
-      throw new Error('유효한 API Key를 찾을 수 없습니다.');
+      throw new Error("유효한 API Key를 찾을 수 없습니다.");
     }
 
-    const cleanedModelName = model.startsWith('models/') ? model : `models/${model}`;
+    const cleanedModelName = model.startsWith("models/")
+      ? model
+      : `models/${model}`;
     const url = `https://generativelanguage.googleapis.com/v1beta/${cleanedModelName}:streamGenerateContent?key=${apiKey}`;
 
     const contentsArray = [
       {
         role: "user",
-        parts: [{ text: textToTranslate }]
-      }
+        parts: [{ text: textToTranslate }],
+      },
     ];
 
     if (assistantPrefill) {
       contentsArray.push({
         role: "model",
-        parts: [{ text: assistantPrefill }]
+        parts: [{ text: assistantPrefill }],
       });
     }
 
     const requestBody = {
       contents: contentsArray,
       systemInstruction: {
-        parts: [
-          { text: systemInstruction }
-        ]
+        parts: [{ text: systemInstruction }],
       },
       generationConfig: {
         temperature: 0.8,
-        topP: 0.8
+        topP: 0.8,
       },
       safetySettings: [
         {
           category: "HARM_CATEGORY_HARASSMENT",
-          threshold: "BLOCK_NONE"
+          threshold: "BLOCK_NONE",
         },
         {
           category: "HARM_CATEGORY_HATE_SPEECH",
-          threshold: "BLOCK_NONE"
+          threshold: "BLOCK_NONE",
         },
         {
           category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-          threshold: "BLOCK_NONE"
+          threshold: "BLOCK_NONE",
         },
         {
           category: "HARM_CATEGORY_DANGEROUS_CONTENT",
-          threshold: "BLOCK_NONE"
-        }
-      ]
+          threshold: "BLOCK_NONE",
+        },
+      ],
     };
 
     try {
       const response = await fetch(url, {
-        method: 'POST',
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json'
+          "Content-Type": "application/json",
         },
         body: JSON.stringify(requestBody),
-        signal: abortSignal
+        signal: abortSignal,
       });
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
-        
+
         // [57단계] 스트리밍에서도 429 에러 또는 서버 에러 500대 감지 시 로테이션
-        if (response.status === 429 || response.status >= 500 || errData.error?.message?.includes('API key') || errData.error?.status === 'RESOURCE_EXHAUSTED') {
+        if (
+          response.status === 429 ||
+          response.status >= 500 ||
+          errData.error?.message?.includes("API key") ||
+          errData.error?.status === "RESOURCE_EXHAUSTED"
+        ) {
           console.warn(`[Gemini API Stream Rate Limit] Rotating key...`);
           rotateApiKey();
           attempts++;
           continue;
         }
-        
+
         if (response.status === 404) {
-          throw new Error(`[NON_RETRIABLE] 모델을 찾을 수 없습니다 (${model}).`);
+          throw new Error(
+            `[NON_RETRIABLE] 모델을 찾을 수 없습니다 (${model}).`,
+          );
         }
 
         // 400 에러 (Safety 등) 즉시 상위로 방출
-        if (response.status === 400 || (errData.error && errData.error.message?.includes('PROHIBITED'))) {
-          throw new Error(`[NON_RETRIABLE_SAFETY] 구글 안전망 필터에 의해 번역 차단됨: ${errData.error?.message}`);
+        if (
+          response.status === 400 ||
+          (errData.error && errData.error.message?.includes("PROHIBITED"))
+        ) {
+          throw new Error(
+            `[NON_RETRIABLE_SAFETY] 구글 안전망 필터에 의해 번역 차단됨: ${errData.error?.message}`,
+          );
         }
 
-        throw new Error(`[NON_RETRIABLE] HTTP error! status: ${response.status}`);
+        throw new Error(
+          `[NON_RETRIABLE] HTTP error! status: ${response.status}`,
+        );
       }
 
       const reader = response.body.getReader();
-      const decoder = new TextDecoder('utf-8');
-      let accumulatedText = '';
-      let buffer = '';
+      const decoder = new TextDecoder("utf-8");
+      let accumulatedText = "";
+      let buffer = "";
 
       while (true) {
         if (abortSignal?.aborted) {
           reader.releaseLock();
-          throw new Error('사용자에 의해 번역이 강제 중단되었습니다.');
+          throw new Error("사용자에 의해 번역이 강제 중단되었습니다.");
         }
 
         const { done, value } = await reader.read();
@@ -340,9 +394,11 @@ export async function translateTextStreamWithRotation(textToTranslate, systemIns
         buffer += decoder.decode(value, { stream: true });
 
         // 버퍼에서 "text": "..." 필드들만 안전하게 인출하여 파싱하는 정밀 복원 정규식
-        const textMatches = [...buffer.matchAll(/"text"\s*:\s*"((?:[^"\\]|\\.)*)"/g)];
-        let currentFullText = '';
-        textMatches.forEach(match => {
+        const textMatches = [
+          ...buffer.matchAll(/"text"\s*:\s*"((?:[^"\\]|\\.)*)"/g),
+        ];
+        let currentFullText = "";
+        textMatches.forEach((match) => {
           try {
             const rawText = match[1];
             const decoded = JSON.parse(`"${rawText}"`);
@@ -358,19 +414,20 @@ export async function translateTextStreamWithRotation(textToTranslate, systemIns
         }
       }
 
-      if (accumulatedText.trim() === '') {
-        throw new Error(`status: 400 - AI 응답 파싱 실패 또는 Safety 차단.\n[RAW 스트림 JSON]: ${buffer}`);
+      if (accumulatedText.trim() === "") {
+        throw new Error(
+          `status: 400 - AI 응답 파싱 실패 또는 Safety 차단.\n[RAW 스트림 JSON]: ${buffer}`,
+        );
       }
 
       return accumulatedText;
-
     } catch (error) {
-      if (error.name === 'AbortError' || abortSignal?.aborted) {
-        throw new Error('사용자에 의해 번역이 강제 중단되었습니다.');
+      if (error.name === "AbortError" || abortSignal?.aborted) {
+        throw new Error("사용자에 의해 번역이 강제 중단되었습니다.");
       }
       console.error(`[Stream Fetch Failure] Attempt ${attempts + 1}:`, error);
 
-      if (error.message.includes('status: 400')) throw error; // [57단계] 400 에러는 즉시 상위로 던짐
+      if (error.message.includes("status: 400")) throw error; // [57단계] 400 에러는 즉시 상위로 던짐
 
       rotateApiKey();
       attempts++;
@@ -378,5 +435,5 @@ export async function translateTextStreamWithRotation(textToTranslate, systemIns
   }
 
   // [57단계] 모든 키 소진 시 명시적인 에러 메시지(ALL_KEYS_EXHAUSTED) 반환
-  throw new Error('ALL_KEYS_EXHAUSTED');
+  throw new Error("ALL_KEYS_EXHAUSTED");
 }

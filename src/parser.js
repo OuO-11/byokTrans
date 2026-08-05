@@ -1,8 +1,8 @@
-import { translateTextWithRotation } from './apiRotator.js';
+import { translateTextWithRotation } from "./apiRotator.js";
 
 /**
  * 1. 목록 번역 (Full Web Page Mode)
- * 원본 HTML 스트링을 받아, 레이아웃(태그 구조)은 100% 유지한 채 
+ * 원본 HTML 스트링을 받아, 레이아웃(태그 구조)은 100% 유지한 채
  * 텍스트가 들어있는 노드들만 찾아내 실시간으로 번역하여 주입한 뒤 완성된 HTML을 반환합니다.
  * @param {string} rawHtml 원본 HTML 소스
  * @param {string} systemPrompt 적용할 소설/목록 번역 프롬프트
@@ -10,25 +10,43 @@ import { translateTextWithRotation } from './apiRotator.js';
  * @param {function} onProgress 진행률 업데이트 콜백 (0 ~ 100)
  * @param {object} cancelRef 중지 처리용 ref
  */
-export async function translateFullPage(rawHtml, systemPrompt, model, onProgress = () => {}, cancelRef = null) {
+export async function translateFullPage(
+  rawHtml,
+  systemPrompt,
+  model,
+  onProgress = () => {},
+  cancelRef = null,
+) {
   // 브라우저의 DOMParser를 이용해 가상 DOM 트리 생성 (CORS에 안전함)
   const parser = new DOMParser();
-  const doc = parser.parseFromString(rawHtml, 'text/html');
+  const doc = parser.parseFromString(rawHtml, "text/html");
 
   // 번역이 필요 없는 태그 목록 (스크립트, 스타일, 메타 태그 등)
-  const EXCLUDE_TAGS = ['SCRIPT', 'STYLE', 'LINK', 'META', 'HEAD', 'NOSCRIPT', 'TEMPLATE'];
+  const EXCLUDE_TAGS = [
+    "SCRIPT",
+    "STYLE",
+    "LINK",
+    "META",
+    "HEAD",
+    "NOSCRIPT",
+    "TEMPLATE",
+  ];
 
   const textNodes = [];
 
   // DOM 트리를 재귀적으로 순회하며 번역할 텍스트 노드 수집
   function walk(node) {
-    if (node.nodeType === Node.ELEMENT_NODE && EXCLUDE_TAGS.includes(node.tagName)) {
+    if (
+      node.nodeType === Node.ELEMENT_NODE &&
+      EXCLUDE_TAGS.includes(node.tagName)
+    ) {
       return;
     }
     // 텍스트 노드이고 공백이 아닌 실제 문자가 들어있는 경우만 수집
     if (node.nodeType === Node.TEXT_NODE) {
       const text = node.nodeValue.trim();
-      if (text.length > 0 && isNaN(text)) { // 순수 숫자 제외
+      if (text.length > 0 && isNaN(text)) {
+        // 순수 숫자 제외
         textNodes.push(node);
       }
     }
@@ -44,7 +62,9 @@ export async function translateFullPage(rawHtml, systemPrompt, model, onProgress
   const totalNodes = textNodes.length;
   if (totalNodes === 0) return rawHtml;
 
-  console.log(`[Full Page Translator] Found ${totalNodes} text nodes to translate.`);
+  console.log(
+    `[Full Page Translator] Found ${totalNodes} text nodes to translate.`,
+  );
 
   // API 호출 최적화: 텍스트 노드들을 묶어 번들링(Batching)하여 요청
   const BATCH_SIZE = 15;
@@ -53,26 +73,32 @@ export async function translateFullPage(rawHtml, systemPrompt, model, onProgress
   for (let i = 0; i < textNodes.length; i += BATCH_SIZE) {
     // [37단계] 중지 신호 감지 시 즉시 루프 탈출
     if (cancelRef && cancelRef.current === true) {
-      console.log('[Full Page Translator] Cancelled by user.');
+      console.log("[Full Page Translator] Cancelled by user.");
       break;
     }
 
     const batch = textNodes.slice(i, i + BATCH_SIZE);
-    
+
     // 번들 구조화: 번역기가 노드 순서를 매핑할 수 있도록 임의의 구분자(ID) 주입
-    const batchText = batch.map((node, index) => `[${index}] ${node.nodeValue.trim()}`).join('\n');
+    const batchText = batch
+      .map((node, index) => `[${index}] ${node.nodeValue.trim()}`)
+      .join("\n");
 
     // 배치별 전용 번역 프롬프트
     const batchPrompt = `${systemPrompt}\n\nIMPORTANT: You must translate each line marked with '[number]' in order. Maintain the format '[number] Translated text'. Do not merge lines or omit numbers.`;
 
     try {
-      const translatedBatch = await translateTextWithRotation(batchText, batchPrompt, model);
-      
+      const translatedBatch = await translateTextWithRotation(
+        batchText,
+        batchPrompt,
+        model,
+      );
+
       // 번역 결과 파싱하여 원래 노드에 주입
-      const lines = translatedBatch.split('\n');
+      const lines = translatedBatch.split("\n");
       const translationMap = {};
 
-      lines.forEach(line => {
+      lines.forEach((line) => {
         const match = line.match(/^\[(\d+)\]\s*(.*)/);
         if (match) {
           const index = parseInt(match[1]);
@@ -87,10 +113,12 @@ export async function translateFullPage(rawHtml, systemPrompt, model, onProgress
           node.nodeValue = translationMap[index];
         }
       });
-
     } catch (e) {
-      console.error(`[Batch Translation Failed] Index ${i} to ${i + BATCH_SIZE}:`, e);
-      batch.forEach(node => {
+      console.error(
+        `[Batch Translation Failed] Index ${i} to ${i + BATCH_SIZE}:`,
+        e,
+      );
+      batch.forEach((node) => {
         node.nodeValue = `${node.nodeValue} (번역 실패)`;
       });
     }
@@ -108,36 +136,55 @@ export async function translateFullPage(rawHtml, systemPrompt, model, onProgress
  */
 export function extractNovelContent(rawHtml, url) {
   const parser = new DOMParser();
-  const doc = parser.parseFromString(rawHtml, 'text/html');
+  const doc = parser.parseFromString(rawHtml, "text/html");
 
   // [중요: 이전화, 다음화, 목차 링크 지능형 사전 수집]
   // 52shuku나 진강 등에서 <a> 태그나 해당 클래스를 가진 노이즈 부모 요소를 소거하기 전에,
   // 원본 DOM 트리에서 회차 이동 버튼 정보를 유실 없이 먼저 추출해 둡니다.
-  let prevUrl = '';
-  let nextUrl = '';
-  let indexUrl = '';
+  let prevUrl = "";
+  let nextUrl = "";
+  let indexUrl = "";
 
-  const links = doc.querySelectorAll('a');
-  links.forEach(a => {
-    const text = a.textContent?.trim() || '';
-    const href = a.getAttribute('href') || '';
+  const links = doc.querySelectorAll("a");
+  links.forEach((a) => {
+    const text = a.textContent?.trim() || "";
+    const href = a.getAttribute("href") || "";
     if (!href) return;
 
-    if (text.includes('上一页') || text.includes('이전 페이지') || text.includes('이전화') || text.includes('上一章') || text.includes('Chương trước')) {
+    if (
+      text.includes("上一页") ||
+      text.includes("이전 페이지") ||
+      text.includes("이전화") ||
+      text.includes("上一章") ||
+      text.includes("Chương trước")
+    ) {
       prevUrl = href;
-    } else if (text.includes('下一页') || text.includes('다음 페이지') || text.includes('다음화') || text.includes('下一章') || text.includes('Chương sau') || text.includes('Tiếp')) {
+    } else if (
+      text.includes("下一页") ||
+      text.includes("다음 페이지") ||
+      text.includes("다음화") ||
+      text.includes("下一章") ||
+      text.includes("Chương sau") ||
+      text.includes("Tiếp")
+    ) {
       nextUrl = href;
-    } else if (text.includes('目录') || text.includes('목차') || text.includes('목록') || text.includes('返回书页') || text.includes('Mục lục')) {
+    } else if (
+      text.includes("目录") ||
+      text.includes("목차") ||
+      text.includes("목록") ||
+      text.includes("返回书页") ||
+      text.includes("Mục lục")
+    ) {
       indexUrl = href;
     }
   });
 
   // 상대 경로 절대 경로화 보정
   const makeAbsolute = (base, relative) => {
-    if (!relative) return '';
+    if (!relative) return "";
     try {
       return new URL(relative, base).toString();
-    } catch(e) {
+    } catch (e) {
       return relative;
     }
   };
@@ -148,104 +195,156 @@ export function extractNovelContent(rawHtml, url) {
 
   // 번역 방해 노이즈 노드(헤더, 푸터, 댓글창, 추천 도서 등) 사전 영구 제거 (14단계)
   const trashSelectors = [
-    'header', 'footer', '#footer', '.footer', 'noscript', 'iframe', 'ins', 'script', 'style',
-    '.comment', '.comments', '#comments', '.reply', '.replies', '#replies', '.ad-box', '.ads',
-    '.right-sidebar', '.sidebar', '.menu', '.navigation', '.breadcrumb', '.breadcrumbs'
+    "header",
+    "footer",
+    "#footer",
+    ".footer",
+    "noscript",
+    "iframe",
+    "ins",
+    "script",
+    "style",
+    ".comment",
+    ".comments",
+    "#comments",
+    ".reply",
+    ".replies",
+    "#replies",
+    ".ad-box",
+    ".ads",
+    ".right-sidebar",
+    ".sidebar",
+    ".menu",
+    ".navigation",
+    ".breadcrumb",
+    ".breadcrumbs",
   ];
-  const trashNodes = doc.querySelectorAll(trashSelectors.join(','));
-  trashNodes.forEach(t => t.remove());
-  
-  let title = doc.querySelector('title')?.textContent?.trim() || '제목 없음';
-  let contentHtml = '';
+  const trashNodes = doc.querySelectorAll(trashSelectors.join(","));
+  trashNodes.forEach((t) => t.remove());
+
+  let title = doc.querySelector("title")?.textContent?.trim() || "제목 없음";
+  let contentHtml = "";
 
   // [65단계] 도메인별 플러그인(모듈화) 파서 레지스트리 구축
-  let hostname = '';
+  let hostname = "";
   try {
     hostname = new URL(url).hostname;
-  } catch(e) {
+  } catch (e) {
     hostname = url;
   }
-  
+
   const siteParsers = [
     {
-      match: (host) => host.includes('sangtacviet.com'),
+      match: (host) => host.includes("sangtacviet.com"),
       extract: (doc, url, prevUrl, nextUrl, indexUrl, title) => {
-        const contentBox = doc.querySelector('.contentbox');
+        const contentBox = doc.querySelector(".contentbox");
         if (contentBox) {
           let r = "";
-          const w = function(n) {
-            n.childNodes.forEach(c => {
-              if (c.nodeType === 1) { // Node.ELEMENT_NODE
-                if (c.tagName === 'I') {
-                  const t = c.getAttribute('t');
+          const w = function (n) {
+            n.childNodes.forEach((c) => {
+              if (c.nodeType === 1) {
+                // Node.ELEMENT_NODE
+                if (c.tagName === "I") {
+                  const t = c.getAttribute("t");
                   if (t) r += t;
-                } else if (c.tagName === 'BR') {
+                } else if (c.tagName === "BR") {
                   r += "\n";
-                } else if (c.tagName !== 'SCRIPT' && c.tagName !== 'STYLE') {
+                } else if (c.tagName !== "SCRIPT" && c.tagName !== "STYLE") {
                   w(c);
                 }
-              } else if (c.nodeType === 3) { // Node.TEXT_NODE
+              } else if (c.nodeType === 3) {
+                // Node.TEXT_NODE
                 r += c.textContent;
               }
             });
           };
           w(contentBox);
           const res = r.trim();
-          const rawLines = res.split('\n');
-          
+          const rawLines = res.split("\n");
+
           const sangtacvietParagraphs = [];
-          rawLines.forEach(line => {
+          rawLines.forEach((line) => {
             let text = line.trim();
             // 한자 사이 띄어쓰기 찌꺼기 정제
-            text = text.replace(/([\u4E00-\u9FFF\u3400-\u4DBF])\s+/g, '$1').replace(/\s+([\u4E00-\u9FFF\u3400-\u4DBF])/g, '$1');
-            if (text && text.length >= 2 && !text.startsWith('http') && isNaN(text)) {
+            text = text
+              .replace(/([\u4E00-\u9FFF\u3400-\u4DBF])\s+/g, "$1")
+              .replace(/\s+([\u4E00-\u9FFF\u3400-\u4DBF])/g, "$1");
+            if (
+              text &&
+              text.length >= 2 &&
+              !text.startsWith("http") &&
+              isNaN(text)
+            ) {
               sangtacvietParagraphs.push(text);
             }
           });
-          
+
           return {
             title,
             paragraphs: sangtacvietParagraphs,
             prevUrl,
             nextUrl,
             indexUrl,
-            sourceLang: 'zh'
+            sourceLang: "zh",
           };
         }
         return null;
-      }
+      },
     },
     {
-      match: (host) => host.includes('52shuku'),
+      match: (host) => host.includes("52shuku"),
       extract: (doc) => {
-        const article = doc.querySelector('.article-content') || doc.querySelector('article');
+        const article =
+          doc.querySelector(".article-content") || doc.querySelector("article");
         if (article) {
-          const targetSelectors = ['.read-page', '.page-link', '.book-page', '.pages', '.ad', '.read-ad'];
-          targetSelectors.forEach(sel => {
+          const targetSelectors = [
+            ".read-page",
+            ".page-link",
+            ".book-page",
+            ".pages",
+            ".ad",
+            ".read-ad",
+          ];
+          targetSelectors.forEach((sel) => {
             const els = article.querySelectorAll(sel);
-            els.forEach(el => el.remove());
+            els.forEach((el) => el.remove());
           });
-          const navElements = article.querySelectorAll('p, div');
-          navElements.forEach(el => {
-            const text = el.textContent?.trim() || '';
-            if ((text.includes('上一页') && text.includes('下一页')) || (text.includes('이전 페이지') && text.includes('다음 페이지')) || (text.includes('목차') && text.includes('다음화')) || (text.includes('目录') && text.includes('下一章'))) {
+          const navElements = article.querySelectorAll("p, div");
+          navElements.forEach((el) => {
+            const text = el.textContent?.trim() || "";
+            if (
+              (text.includes("上一页") && text.includes("下一页")) ||
+              (text.includes("이전 페이지") && text.includes("다음 페이지")) ||
+              (text.includes("목차") && text.includes("다음화")) ||
+              (text.includes("目录") && text.includes("下一章"))
+            ) {
               el.remove();
             }
           });
           return article.innerHTML;
         }
         return null;
-      }
+      },
     },
     {
-      match: (host) => host.includes('jjwxc.net') || host.includes('jjwxc.com'),
+      match: (host) => host.includes("jjwxc.net") || host.includes("jjwxc.com"),
       extract: (doc) => {
-        let contentArea = doc.querySelector('#novelcontent') || doc.querySelector('.novelcontent') || doc.querySelector('.noveltext') || doc.querySelector('#content') || doc.querySelector('td.noveltext');
-        if (!contentArea && (hostname.includes('m.jjwxc.net') || hostname.includes('m.jjwxc'))) {
-          const candidates = doc.querySelectorAll('.b.module, div[class*="module"], .note_main');
+        let contentArea =
+          doc.querySelector("#novelcontent") ||
+          doc.querySelector(".novelcontent") ||
+          doc.querySelector(".noveltext") ||
+          doc.querySelector("#content") ||
+          doc.querySelector("td.noveltext");
+        if (
+          !contentArea &&
+          (hostname.includes("m.jjwxc.net") || hostname.includes("m.jjwxc"))
+        ) {
+          const candidates = doc.querySelectorAll(
+            '.b.module, div[class*="module"], .note_main',
+          );
           let longestDiv = null;
           let maxLen = 0;
-          candidates.forEach(el => {
+          candidates.forEach((el) => {
             const textLen = el.textContent?.trim().length || 0;
             if (textLen > maxLen) {
               maxLen = textLen;
@@ -257,35 +356,52 @@ export function extractNovelContent(rawHtml, url) {
           }
         }
         if (contentArea) {
-          const navSelects = ['.nav', '.novel_nav', 'a', 'style', 'script', '#comment_list_new', '.recommend_novel_box'];
-          navSelects.forEach(sel => {
-            contentArea.querySelectorAll(sel).forEach(el => el.remove());
+          const navSelects = [
+            ".nav",
+            ".novel_nav",
+            "a",
+            "style",
+            "script",
+            "#comment_list_new",
+            ".recommend_novel_box",
+          ];
+          navSelects.forEach((sel) => {
+            contentArea.querySelectorAll(sel).forEach((el) => el.remove());
           });
           return contentArea.innerHTML;
         }
         return null;
-      }
+      },
     },
     {
-      match: (host) => host.includes('archiveofourown.org') || host.includes('ao3'),
+      match: (host) =>
+        host.includes("archiveofourown.org") || host.includes("ao3"),
       extract: (doc) => {
-        const chapters = doc.querySelector('#chapters') || doc.querySelector('.userstuff');
+        const chapters =
+          doc.querySelector("#chapters") || doc.querySelector(".userstuff");
         if (chapters) return chapters.innerHTML;
         return null;
-      }
-    }
+      },
+    },
   ];
 
   // 플러그인 매칭 실행
   for (const parserModule of siteParsers) {
     if (parserModule.match(hostname)) {
-      const result = parserModule.extract(doc, url, prevUrl, nextUrl, indexUrl, title);
+      const result = parserModule.extract(
+        doc,
+        url,
+        prevUrl,
+        nextUrl,
+        indexUrl,
+        title,
+      );
       // 만약 객체가 바로 반환되었다면 (예: sangtacviet) 그대로 리턴
-      if (result && typeof result === 'object' && result.paragraphs) {
+      if (result && typeof result === "object" && result.paragraphs) {
         return result;
       }
       // 문자열 HTML이 반환되었다면 (예: 52shuku, jjwxc) contentHtml에 할당
-      if (typeof result === 'string') {
+      if (typeof result === "string") {
         contentHtml = result;
       }
       break;
@@ -294,49 +410,67 @@ export function extractNovelContent(rawHtml, url) {
 
   // 만약 도메인별 특화 파싱에 실패했다면, 브라우저 표준 리더기 알고리즘 모방 (일반 p태그 본문 수집)
   if (!contentHtml) {
-    const paragraphs = doc.querySelectorAll('p');
+    const paragraphs = doc.querySelectorAll("p");
     if (paragraphs.length > 5) {
-      contentHtml = Array.from(paragraphs).map(p => p.outerHTML).join('\n');
+      contentHtml = Array.from(paragraphs)
+        .map((p) => p.outerHTML)
+        .join("\n");
     } else {
-      const bodyText = doc.body?.innerText || '';
-      contentHtml = bodyText.split('\n').map(line => line.trim() ? `<p>${line.trim()}</p>` : '').join('\n');
+      const bodyText = doc.body?.innerText || "";
+      contentHtml = bodyText
+        .split("\n")
+        .map((line) => (line.trim() ? `<p>${line.trim()}</p>` : ""))
+        .join("\n");
     }
   }
 
   // [45단계] 루비 문자 전처리: cleanDoc 파싱 전에 <ruby>漢字<rt>よみ</rt></ruby> → 漢字[よみ] 로 치환
   // 일본 소설의 독음 주석(후리가나)을 보존하여 AI 번역 품질 향상
-  contentHtml = contentHtml.replace(/<ruby>([^<]*?)<rt[^>]*>([^<]*?)<\/rt><\/ruby>/gi, '$1[$2]');
+  contentHtml = contentHtml.replace(
+    /<ruby>([^<]*?)<rt[^>]*>([^<]*?)<\/rt><\/ruby>/gi,
+    "$1[$2]",
+  );
 
   // 정제화 작업: 본문 안의 불필요한 스크립트, 광고성 배너 잔재들 최종 소거
-  const cleanDoc = parser.parseFromString(contentHtml, 'text/html');
-  const scripts = cleanDoc.querySelectorAll('script, style, iframe, ins');
-  scripts.forEach(s => s.remove());
+  const cleanDoc = parser.parseFromString(contentHtml, "text/html");
+  const scripts = cleanDoc.querySelectorAll("script, style, iframe, ins");
+  scripts.forEach((s) => s.remove());
 
   // [39단계 구조적 해결] <a> 링크 태그들을 본문 추출용 cleanDoc DOM에서 영구 제거
-  // 본문 안에는 <a> 링크가 들어가지 않으므로, <a> 태그를 날려주면 
+  // 본문 안에는 <a> 링크가 들어가지 않으므로, <a> 태그를 날려주면
   // 'Top', '目录', '이전화' 등 페이지 내비게이션 버튼 찌꺼기가 텍스트 블랙리스트 없이 깔끔하게 걸러집니다.
-  cleanDoc.querySelectorAll('a').forEach(a => a.remove());
+  cleanDoc.querySelectorAll("a").forEach((a) => a.remove());
 
   // [34단계 핵심: 줄바꿈 분할 및 jjwxc 전용 블랙리스트 필터링 도입]
   // 1. <br> 태그들을 \n 줄바꿈 문자로 변환하여 한 덩어리의 텍스트 안에서 문단 구분이 깨지지 않게 보정
-  const brs = cleanDoc.querySelectorAll('br');
-  brs.forEach(br => {
-    const textNode = cleanDoc.createTextNode('\n');
+  const brs = cleanDoc.querySelectorAll("br");
+  brs.forEach((br) => {
+    const textNode = cleanDoc.createTextNode("\n");
     br.parentNode?.replaceChild(textNode, br);
   });
 
   const paragraphsList = [];
-  
-  // 2. 전체 HTML 본문을 \n 기준으로 쪼개어 가공
-  const rawText = cleanDoc.body?.textContent || '';
-  const lines = rawText.split('\n');
 
-  lines.forEach(line => {
+  // 2. 전체 HTML 본문을 \n 기준으로 쪼개어 가공
+  const rawText = cleanDoc.body?.textContent || "";
+  const lines = rawText.split("\n");
+
+  lines.forEach((line) => {
     const text = line.trim();
     // [39단계] 텍스트가 존재하고, 최소 2글자 이상이며, URL이나 숫자가 아닐 때만 수집 (2차 필터링)
     // + [추가] 52shuku 및 특정 사이트 고유 노이즈 제거 (번역 전 원문 찌꺼기 핀포인트 필터링)
-    const isNoise = text.includes('52书库不错') || text.includes('传送门') || text.toLowerCase() === 'top' || text.toLowerCase() === 'top\\ntop';
-    if (text && text.length >= 2 && !text.startsWith('http') && isNaN(text) && !isNoise) {
+    const isNoise =
+      text.includes("52书库不错") ||
+      text.includes("传送门") ||
+      text.toLowerCase() === "top" ||
+      text.toLowerCase() === "top\\ntop";
+    if (
+      text &&
+      text.length >= 2 &&
+      !text.startsWith("http") &&
+      isNaN(text) &&
+      !isNoise
+    ) {
       paragraphsList.push(text);
     }
   });
@@ -346,6 +480,6 @@ export function extractNovelContent(rawHtml, url) {
     paragraphs: paragraphsList,
     prevUrl,
     nextUrl,
-    indexUrl
+    indexUrl,
   };
 }
