@@ -39,9 +39,21 @@ public class WebViewFetchPlugin extends Plugin {
 
         getActivity().runOnUiThread(() -> {
             WebView webView = new WebView(getContext());
+            
+            // [추가] 봇 탐지 회피를 위해 실제 뷰 계층에 보이지 않게 부착 (화면 밖 1x1 픽셀)
+            // 화면에 렌더링되지 않는 WebView는 requestAnimationFrame 등이 무시되거나 Bot으로 탐지됨
+            android.view.ViewGroup rootView = (android.view.ViewGroup) getActivity().getWindow().getDecorView().getRootView();
+            android.widget.FrameLayout.LayoutParams params = new android.widget.FrameLayout.LayoutParams(1, 1);
+            params.leftMargin = -10000;
+            params.topMargin = -10000;
+            rootView.addView(webView, params);
+
             WebSettings settings = webView.getSettings();
             settings.setJavaScriptEnabled(true);
             settings.setDomStorageEnabled(true);
+            // Mixed Content 허용
+            settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+            
             // 데스크탑 Chrome UA — Sangtacviet 모바일 HTML 분기 방지
             settings.setUserAgentString(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
@@ -66,6 +78,9 @@ public class WebViewFetchPlugin extends Plugin {
                             "})()";
 
                         view.evaluateJavascript(js, base64Result -> {
+                            // 처리 끝난 후 뷰 계층에서 제거
+                            rootView.removeView(webView);
+                            
                             try {
                                 if (base64Result == null) {
                                     call.reject("evaluateJavascript returned null");
@@ -108,6 +123,7 @@ public class WebViewFetchPlugin extends Plugin {
                     String description,
                     String failingUrl
                 ) {
+                    rootView.removeView(webView);
                     call.reject("WebView 로드 오류 (" + errorCode + "): " + description);
                 }
             });
