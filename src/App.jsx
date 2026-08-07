@@ -18,6 +18,7 @@ import {
   AlertTriangle,
   Sun,
   Moon,
+  Info,
 } from "lucide-react";
 import {
   openDB,
@@ -106,6 +107,8 @@ const DEFAULT_READER_SETTINGS = {
 
 function App() {
   const [activeTab, setActiveTab] = useState("library");
+  const [latestRelease, setLatestRelease] = useState(null);
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [novels, setNovels] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -157,6 +160,26 @@ function App() {
   const [appTheme, setAppTheme] = useState(() => {
     return localStorage.getItem("noveltrans_app_theme") || "dark";
   });
+
+  useEffect(() => {
+    if (activeTab === "info") {
+      const checkUpdate = async () => {
+        setIsCheckingUpdate(true);
+        try {
+          const res = await fetch("https://api.github.com/repos/OuO-11/byokTrans/releases/latest");
+          if (res.ok) {
+            const data = await res.json();
+            setLatestRelease(data);
+          }
+        } catch (err) {
+          console.error("Failed to fetch latest release", err);
+        } finally {
+          setIsCheckingUpdate(false);
+        }
+      };
+      checkUpdate();
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", appTheme);
@@ -4115,6 +4138,81 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
         </div>
       )}
 
+      {/* 제 6 탭: 이용 안내 & 소통 */}
+      {activeTab === "info" && (
+        <div
+          style={{
+            padding: "16px",
+            paddingBottom: "80px",
+            color: "var(--text-main)",
+            overflowY: "auto",
+            height: "100%",
+          }}
+        >
+          <h3
+            style={{
+              margin: 0,
+              marginBottom: "16px",
+              fontSize: "18px",
+              fontWeight: "bold",
+            }}
+          >
+            ℹ️ 이용 안내 & 소통
+          </h3>
+          
+          <div style={{ backgroundColor: "var(--bg-card)", padding: "16px", borderRadius: "8px", marginBottom: "16px" }}>
+            <h4 style={{ margin: "0 0 8px 0", fontSize: "15px", fontWeight: "bold" }}>💡 개발자에게 건의하기</h4>
+            <p style={{ margin: 0, fontSize: "14px", color: "var(--text-muted)", lineHeight: 1.5 }}>- 원하는 사항 입력. 지원 사이트 확대/필요 기능 등등.</p>
+          </div>
+      
+          <div style={{ backgroundColor: "var(--bg-card)", padding: "16px", borderRadius: "8px", marginBottom: "16px" }}>
+            <h4 style={{ margin: "0 0 8px 0", fontSize: "15px", fontWeight: "bold" }}>🌐 지원 사이트 목록 현황</h4>
+            <p style={{ margin: 0, fontSize: "14px", color: "var(--text-muted)", lineHeight: 1.5 }}>- 52shuku (정상 지원)</p>
+          </div>
+      
+          <div style={{ backgroundColor: "var(--bg-card)", padding: "16px", borderRadius: "8px", marginBottom: "16px" }}>
+            <h4 style={{ margin: "0 0 8px 0", fontSize: "15px", fontWeight: "bold" }}>📢 최신 업데이트 내역</h4>
+            {isCheckingUpdate ? (
+              <p style={{ margin: 0, fontSize: "14px", color: "var(--text-muted)", lineHeight: 1.5 }}>최신 버전 확인 중...</p>
+            ) : latestRelease ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                <p style={{ margin: 0, fontSize: "14px", color: "var(--text-main)", fontWeight: "bold" }}>현재 최신 버전: {latestRelease.name || latestRelease.tag_name}</p>
+                {latestRelease.body && (
+                   <p style={{ margin: 0, fontSize: "13px", color: "var(--text-muted)", whiteSpace: "pre-wrap", maxHeight: "100px", overflowY: "auto", padding: "8px", backgroundColor: "var(--bg-main)", borderRadius: "6px" }}>
+                     {latestRelease.body}
+                   </p>
+                )}
+                {latestRelease.assets && latestRelease.assets.find(a => a.name.endsWith('.apk')) && (
+                  <button
+                    onClick={() => window.open(latestRelease.assets.find(a => a.name.endsWith('.apk')).browser_download_url, "_blank")}
+                    style={{
+                      marginTop: "4px",
+                      padding: "10px",
+                      backgroundColor: "var(--primary)",
+                      color: "#11111b",
+                      border: "none",
+                      borderRadius: "8px",
+                      fontWeight: "bold",
+                      cursor: "pointer",
+                      fontSize: "14px"
+                    }}
+                  >
+                    🚀 byokTrans {latestRelease.tag_name} 다운로드 (APK)
+                  </button>
+                )}
+              </div>
+            ) : (
+              <p style={{ margin: 0, fontSize: "14px", color: "var(--text-muted)", lineHeight: 1.5 }}>버전 정보를 불러올 수 없습니다.</p>
+            )}
+          </div>
+      
+          <div style={{ backgroundColor: "var(--bg-card)", padding: "16px", borderRadius: "8px", marginBottom: "16px" }}>
+            <h4 style={{ margin: "0 0 8px 0", fontSize: "15px", fontWeight: "bold" }}>🔑 API 키 발급 가이드</h4>
+            <p style={{ margin: 0, fontSize: "14px", color: "var(--text-muted)", lineHeight: 1.5 }}></p>
+          </div>
+        </div>
+      )}
+
       {/* 하단 네비게이션 */}
       <footer
         style={{
@@ -4131,6 +4229,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
           { id: "library", label: "보관함", icon: FolderHeart },
           { id: "translate", label: "실시간번역", icon: BookOpen },
           { id: "presets", label: "번역 설정", icon: Settings },
+          { id: "info", label: "이용 안내", icon: Info },
         ].map((tab) => {
           const Icon = tab.icon;
           const isActive =

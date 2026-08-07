@@ -1,8 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
-  <rect width="100" height="100" rx="20" fill="#1e1e2e"/>
-  <!-- 책 심볼 -->
-  <path d="M25 35C25 28 35 28 50 32C65 28 75 28 75 35V75C75 68 65 68 50 72C35 68 25 68 25 75V35Z" fill="#cdd6f4" stroke="#89b4fa" stroke-width="3" stroke-linejoin="round"/>
-  <path d="M50 32V72" stroke="#89b4fa" stroke-width="3" stroke-linecap="round"/>
-  <!-- 번역 번개 심볼 -->
-  <path d="M45 42L55 52M55 42L45 52" stroke="#a6e3a1" stroke-width="4" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#81c784"/>
+      <stop offset="100%" stop-color="#83c5be"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="128" ry="128" fill="url(#grad1)" />
+  <g transform="translate(128, 128) scale(10.666)">
+    <!-- Lucide BookOpen SVG path, 24x24 viewBox -->
+    <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" fill="none" stroke="#11111b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" fill="none" stroke="#11111b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
 </svg>
