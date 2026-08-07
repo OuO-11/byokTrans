@@ -51,6 +51,7 @@ import { downloadCachedEpisodes } from "./downloader.js";
 import {
   extractCoreTextNodes,
   applyTranslationsToDOM,
+  getBase52Id,
 } from "./utils/domTranslator.js";
 import darkReaderCodeRawString from "./plugins/darkreader.js?raw";
 
@@ -737,6 +738,7 @@ function App() {
 번역 섹션: 각 줄은 <p id="ID">번역</p> 형식. 동일한 ID의 원문에 정확히 일대일대응하도록 번역 작성. 문장이 여러 줄에 걸쳐 있는 경우 절대로 문장을 임의로 합치지 않고 엄격하게 각 줄을 독립적으로 번역.
 
 [지침]
+원문 내부에 존재하는 <v0>, <v1> 등의 가상 태그는 인라인 요소(색상, 링크 등)를 의미하므로, 절대 삭제하거나 훼손하지 말고 번역된 문맥의 알맞은 위치에 반드시 그대로 포함시킬 것.
 직역투를 피하며 최대한 자연스럽게 의역하되, 원문의 말투와 내용은 철저히 유지. 원문의 사실 관계를 왜곡하거나 고유명사의 과한 현지화 금지.
 일본어 고유명사는 국립국어원 표기법을 무시하고 해당 장르 및 작품에서 대중에게 친숙한 서브컬처 통용 표기를 최우선하되, 통용 표기가 불확실하다면 실제 일본어 발음에 가깝게 표기.
 일본어가 아닌 중국어 고유명사는 원어 발음 대신 한국 한자음을 엄격히 지키며 표기.
@@ -892,19 +894,9 @@ function App() {
         );
       }
 
-      let translatedTitle = title;
-      try {
-        translatedTitle = await translateTextWithRotation(
-          title,
-          "Translate this novel title into natural, clean Korean. Return ONLY the translated Korean text without any other explanations or punctuation.",
-          selectedModel,
-        );
-      } catch (e) {
-        console.warn("Title translation fallback:", e);
-      }
-
-      const combinedTitle = `${translatedTitle.trim()} / ${title.trim()}`;
-      setViewerTitle(combinedTitle);
+      let streamTranslatedTitle = "AI 번역 대기 중...";
+      const combinedTitle = title.trim(); // 스트리밍 전 임시 제목
+      setViewerTitle(`${streamTranslatedTitle} / ${title.trim()}`);
       setViewerPrevUrl(prevUrl || "");
       setViewerNextUrl(nextUrl || "");
       setViewerIndexUrl(indexUrl || "");
@@ -1066,8 +1058,23 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
             `[Translation Continuation #${continuationCount + 1}] Processing ${pendingIndices.length} pending paragraphs...`,
           );
 
-          const joinedText = pendingIndices
-            .map((idx) => `<p id="${idx}">${paragraphs[idx].trim()}</p>`)
+          if (continuationCount > 0) {
+            showToast(`응답 지연으로 재시도 중입니다... (${continuationCount}/${maxContinuationAttempts})`);
+          }
+
+          const idToIndex = {};
+          let joinedText = "";
+
+          if (streamTranslatedTitle === "AI 번역 대기 중...") {
+            joinedText += `<p id="TITLE">${title.trim()}</p>\n`;
+          }
+
+          joinedText += pendingIndices
+            .map((idx) => {
+              const b52 = getBase52Id(idx);
+              idToIndex[b52] = idx;
+              return `<p id="${b52}">${paragraphs[idx].trim()}</p>`;
+            })
             .join("\n");
           const pendingRawText = joinedText;
 
@@ -1078,15 +1085,37 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
               fullAiTextBuffer = chunk;
 
               // [45단계 핵심] 정규식 매칭 실패에 따른 스트리밍 지연 방지를 위해 split() 기반 파싱 사용
-              const chunksByTag = fullAiTextBuffer.split(/<p id="(\d+)">/);
+              const chunksByTag = fullAiTextBuffer.split(/<p\s+id=['"]?([A-Za-z]+)['"]?>/);
               let maxProcessedIndex = -1;
 
-              // chunksByTag는 ["", "0", "내용...", "1", "내용...", ...] 형태로 쪼개짐
+              // chunksByTag는 ["", "A", "내용...", "B", "내용...", ...] 형태로 쪼개짐
               for (let i = 1; i < chunksByTag.length; i += 2) {
-                const idx = parseInt(chunksByTag[i]);
+                const b52 = chunksByTag[i];
+                
                 let text = chunksByTag[i + 1] || "";
                 // 닫는 태그(</p>) 이후의 찌꺼기 문자열이 있다면 제거
                 text = text.replace(/<\/p>[\s\S]*$/, "").trim();
+
+                if (b52 === "TITLE") {
+                  if (text && text !== streamTranslatedTitle) {
+                    streamTranslatedTitle = text;
+                    const newCombinedTitle = `${text} / ${title.trim()}`;
+                    setViewerTitle(newCombinedTitle);
+                    
+                    // 제목 번역이 완료되면 DB에도 제목을 업데이트합니다.
+                    if (novelId) {
+                      saveNovel({
+                        ...existingNovel, // 만약 existingNovel이 없다면 새로 만든 객체를 기반으로 해야 하므로 아래에서 다시 조회합니다.
+                        id: novelId,
+                        title: newCombinedTitle,
+                      }).catch(e => console.warn("DB Title Update Error:", e));
+                    }
+                  }
+                  continue;
+                }
+
+                const idx = idToIndex[b52];
+                if (idx === undefined) continue;
 
                 if (pendingIndices.includes(idx)) {
                   translatedList[idx] = text;
@@ -1276,6 +1305,8 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
 
     setIsTranslating(true);
     setTransProgress(5);
+    cancelTranslationRef.current = false;
+    translationAbortControllerRef.current = new AbortController();
     // [FIX] Do NOT clear novelHtmlResult here. If we clear it, the iframe turns blank (black screen in dark mode)
     // while waiting for the fetch. By keeping the old HTML, it behaves gracefully like before.
 

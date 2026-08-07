@@ -209,9 +209,12 @@ export function applyTranslationsToDOM(nodeMap, aiResponse) {
   for (let i = 1; i < chunksByTag.length; i += 2) {
     const id = chunksByTag[i];
     let htmlText = chunksByTag[i + 1] || "";
+    
+    // 스트리밍 중 문단이 완전히 닫혔는지 확인
+    const isComplete = htmlText.includes("</p>");
     htmlText = htmlText.replace(/<\/p>[\s\S]*$/, "").trim();
 
-    if (nodeMap[id] && nodeMap[id].instances && htmlText) {
+    if (isComplete && nodeMap[id] && nodeMap[id].instances && htmlText) {
       const instances = nodeMap[id].instances;
 
       for (const instance of instances) {
@@ -259,10 +262,15 @@ export function applyTranslationsToDOM(nodeMap, aiResponse) {
           return document.createTextNode("");
         }
 
-        // Build a fragment with the new reconstructed nodes
-        const frag = document.createDocumentFragment();
+        // Build an array of the new reconstructed nodes
+        const newGroup = [];
         for (let parsedChild of Array.from(wrapper.childNodes)) {
-          frag.appendChild(reconstruct(parsedChild));
+          newGroup.push(reconstruct(parsedChild));
+        }
+
+        const frag = document.createDocumentFragment();
+        for (let newNode of newGroup) {
+          frag.appendChild(newNode);
         }
 
         // Remove the old group of nodes
@@ -278,12 +286,17 @@ export function applyTranslationsToDOM(nodeMap, aiResponse) {
           targetAnchor = null; // fallback to append
         }
         parent.insertBefore(frag, targetAnchor);
+        
+        // Update the instance group so the next stream tick replaces these nodes!
+        instance.group = newGroup;
 
         updatedCount++;
       }
 
-      // Mark as processed
-      delete nodeMap[id];
+      // Mark as processed ONLY when the paragraph has fully streamed
+      if (isComplete) {
+        delete nodeMap[id];
+      }
     }
   }
 
