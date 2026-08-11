@@ -1,5 +1,69 @@
 import { CapacitorHttp } from "@capacitor/core";
 import { WebViewFetch } from "./plugins/WebViewFetchPlugin.js";
+import jschardet from "jschardet";
+
+/**
+ * base64 형태로 수신된 바이트 데이터를 올바른 인코딩으로 디코딩합니다.
+ * 헤더 -> 메타 태그 -> jschardet 통계적 추론의 3단계를 거칩니다.
+ */
+function decodeResponseData(base64Data, headers) {
+  if (!base64Data) return "";
+  
+  try {
+    const binaryString = atob(base64Data);
+    const bytes = Uint8Array.from(binaryString, c => c.charCodeAt(0));
+    
+    // 1. 헤더에서 추출 시도
+    let contentType = "";
+    if (headers) {
+      contentType = headers["content-type"] || headers["Content-Type"] || "";
+    }
+    
+    let encoding = null;
+    if (contentType) {
+      const match = contentType.match(/charset=["']?([a-zA-Z0-9-_]+)/i);
+      if (match) {
+        encoding = match[1].toLowerCase();
+      }
+    }
+    
+    // 2. HTML 내부 <meta> 태그 1차 디코딩 후 확인
+    if (!encoding) {
+      // 앞부분 4KB만 ASCII로 살짝 읽어서 태그 스캔
+      const asciiText = new TextDecoder("ascii").decode(bytes.slice(0, 4096));
+      const metaMatch = asciiText.match(/charset=["']?([a-zA-Z0-9-_]+)/i);
+      if (metaMatch) {
+        encoding = metaMatch[1].toLowerCase();
+      }
+    }
+    
+    // 3. 최후의 보루: jschardet 통계적 인코딩 추론
+    if (!encoding) {
+      const sample = binaryString.substring(0, 8192); // 앞부분 8KB 샘플링
+      const detected = jschardet.detect(sample);
+      if (detected && detected.encoding) {
+        encoding = detected.encoding.toLowerCase();
+      }
+    }
+    
+    // 안전한 디코딩을 위한 이름 정규화
+    if (!encoding) {
+      encoding = "utf-8"; 
+    } else if (encoding === "gb2312" || encoding === "gb18030") {
+      encoding = "gbk";
+    }
+    
+    // 4. 결정된 인코딩으로 최종 바이트 디코딩
+    return new TextDecoder(encoding).decode(bytes);
+  } catch (error) {
+    console.error("[Encoding Decode Error]", error);
+    try {
+      return new TextDecoder("utf-8").decode(Uint8Array.from(atob(base64Data), c => c.charCodeAt(0)));
+    } catch(e) {
+      return base64Data;
+    }
+  }
+}
 
 /**
  * GET 응답 헤더에서 Set-Cookie 값을 파싱하여 Cookie 헤더용 문자열로 반환합니다.
@@ -85,10 +149,10 @@ export async function fetchNativeDirect(url) {
           url: url,
           method: "GET",
           headers: headers,
-          responseType: "text",
+          responseType: "arraybuffer",
         });
 
-        let htmlContent = res.data;
+        let htmlContent = decodeResponseData(res.data, res.headers);
 
         // 본문(contentbox)은 있는데 실제 텍스트(<i> 태그 등)가 없으면 AJAX 호출 필요
         if (htmlContent.includes('class="contentbox"') && !htmlContent.includes('<i ')) {
@@ -132,10 +196,10 @@ export async function fetchNativeDirect(url) {
                 method: "POST",
                 headers: ajaxHeaders,
                 data: "rescan=true&k=",
-                responseType: "text",
+                responseType: "arraybuffer",
               });
 
-              let ajaxHtml = ajaxRes.data;
+              let ajaxHtml = decodeResponseData(ajaxRes.data, ajaxRes.headers);
               if (typeof ajaxHtml === 'string' && ajaxHtml.trim().startsWith('{')) {
                 try {
                   const data = JSON.parse(ajaxHtml);
@@ -174,10 +238,12 @@ export async function fetchNativeDirect(url) {
       url: url,
       method: "GET",
       headers: headers,
-      responseType: "text",
+      responseType: "arraybuffer",
     });
 
-    return { html: res.data, status: res.status, url: res.url || url };
+    const decodedHtml = decodeResponseData(res.data, res.headers);
+
+    return { html: decodedHtml, status: res.status, url: res.url || url };
   } catch (error) {
     return { error: `Failed to fetch resource (Native): ${error.message}` };
   }
