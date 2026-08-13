@@ -23,6 +23,7 @@ import {
 import {
   openDB,
   saveNovel,
+  getNovel,
   getNovels,
   deleteNovel,
   saveEpisode,
@@ -593,6 +594,20 @@ function App() {
     if (url.includes("/Tags_") || url.includes("/tags/")) {
       return false;
     }
+
+    let isJjwxcMobile = false;
+    try {
+      const parsed = new URL(url);
+      if (parsed.hostname.includes("m.jjwxc")) {
+        isJjwxcMobile = true;
+        // 진강 모바일은 반드시 book2/숫자/숫자 형태거나 chapterid 쿼리가 있어야 함
+        if (parsed.pathname.match(/\/book2\/\d+\/\d+\/?$/i)) return true;
+        if (parsed.search.match(/[?&]chapterid=(\d+)/i)) return true;
+        if (parsed.pathname.match(/\/wap\.php/i) && parsed.search.match(/chapterid=\d+/i)) return true;
+        return false; // 그 외에는 본문이 아님
+      }
+    } catch(e) {}
+
     return (
       url.match(/_(\d+)\.html/i) ||
       url.match(/[?&]chapterid=(\d+)/i) ||
@@ -1162,11 +1177,17 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                     
                     // 제목 번역이 완료되면 DB에도 제목을 업데이트합니다.
                     if (novelId) {
-                      saveNovel({
-                        ...existingNovel, // 만약 existingNovel이 없다면 새로 만든 객체를 기반으로 해야 하므로 아래에서 다시 조회합니다.
-                        id: novelId,
-                        title: newCombinedTitle,
-                      }).catch(e => console.warn("DB Title Update Error:", e));
+                      getNovel(novelId).then(currentNovel => {
+                        if (currentNovel) {
+                          // 이미 보관함의 제목에 " / " (번역완료) 패턴이 있으면 DB 쓰기 생략
+                          if (!currentNovel.title.includes(" / ")) {
+                            saveNovel({
+                              ...currentNovel,
+                              title: newCombinedTitle,
+                            }).catch(e => console.warn("DB Title Update Error:", e));
+                          }
+                        }
+                      }).catch(e => console.warn("DB Novel Fetch Error:", e));
                     }
                   }
                   continue;
@@ -1459,6 +1480,9 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
           `<head>${themeScript}<meta name="color-scheme" content="${appTheme}"></head>` +
           themeInjectedHtml;
       }
+
+      // [Frame Buster 무력화] 강제 리다이렉트를 막기 위해 top.location, parent.location 등을 로컬로 치환
+      themeInjectedHtml = themeInjectedHtml.replace(/(top|parent)\.location/g, "window.location");
 
       setIframeKey((prev) => prev + 1);
       setNovelHtmlResult(themeInjectedHtml);
@@ -2713,6 +2737,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
               key={iframeKey}
               srcDoc={novelHtmlResult}
               title="Page Translation Result"
+              sandbox="allow-same-origin allow-scripts allow-forms"
               onLoad={handleIframeLoad}
               style={{
                 flex: 1,

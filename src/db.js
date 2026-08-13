@@ -48,6 +48,21 @@ export async function saveNovel(novel) {
 }
 
 /**
+ * 특정 소설을 보관함에서 가져옵니다.
+ */
+export async function getNovel(novelId) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(["novels"], "readonly");
+    const store = transaction.objectStore("novels");
+    const request = store.get(novelId);
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = (e) => reject("Failed to get novel: " + e.target.error);
+  });
+}
+
+/**
  * 저장된 모든 소설 목록을 가져옵니다.
  */
 export async function getNovels() {
