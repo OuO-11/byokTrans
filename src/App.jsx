@@ -1,3 +1,4 @@
+import webViewManager from "./WebViewManager";
 import React, { useState, useEffect, useRef } from "react";
 import { Capacitor } from "@capacitor/core";
 import { App as CapacitorApp } from "@capacitor/app";
@@ -1513,6 +1514,20 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
   const handleTranslateStart = () => {
     const finalMode = isNovelEpisodeUrl(inputUrl) ? "viewer" : "page";
     setTransMode(finalMode);
+    
+    // InAppBrowser 열기
+    webViewManager.openNovel({
+      url: inputUrl,
+      onNavigate: (url) => { console.log("Navigated to", url); },
+      onTranslateReq: async (data) => {
+         // 기존 번역 로직 연결점
+         console.log("Translation requested", data);
+         return []; // TODO: 실제 번역 API 연결
+      },
+      onClose: () => {
+         setActiveTab("translate"); // 홈으로 복귀
+      }
+    });
 
     const detectedChapter = detectChapterFromUrl(inputUrl);
     setActiveViewerChapter(detectedChapter);
@@ -2148,7 +2163,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
             style={{ display: "flex", flexDirection: "column", gap: "20px" }}
           >
             <h3 style={{ margin: 0, fontSize: "18px", fontWeight: "bold" }}>
-              AI 실시간 번역 시작
+              홈 (번역 런처) 시작
             </h3>
 
             <div
@@ -2733,21 +2748,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
               )}
             </div>
             {/* iframe — 여백 없이 풀스크린 (key 갱신을 통해 중복 로드 및 상태 오염 방지) */}
-            <iframe
-              key={iframeKey}
-              srcDoc={novelHtmlResult}
-              title="Page Translation Result"
-              sandbox="allow-same-origin allow-scripts allow-forms"
-              onLoad={handleIframeLoad}
-              style={{
-                flex: 1,
-                border: "none",
-                borderRadius: 0,
-                backgroundColor: appTheme === "dark" ? "#121310" : "#ffffff",
-                width: "100%",
-                display: "block",
-              }}
-            />
+            {/* iframe removed, using WebViewManager instead */}
           </div>
         )}
 
