@@ -358,12 +358,7 @@ function App() {
             false,
             true,
           );
-        } else if (
-          e.state.mode === "pageResult" &&
-          startPageTranslationRef.current
-        ) {
-          startPageTranslationRef.current(e.state.url, false, true);
-        }
+        } 
       } else {
         if (
           activeTabRef.current === "viewer" ||
@@ -913,7 +908,7 @@ function App() {
     cancelTranslationRef.current = false;
     setClickedOriginals({});
     setTransProgress(5);
-    setNovelHtmlResult("");
+    
     setViewerParagraphs([]);
 
     const basePrompt = basePrompts[selectedLang] || "";
@@ -1374,7 +1369,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
       if (!iframeDoc) return;
 
       // 임시 빈 문서 로딩 시에는 번역기 가동을 방지하여 isTranslating 상태가 false로 강제 종료되는 현상 방지
-      if (!novelHtmlResult) return;
+      
 
       // [테마 동기화] iframe이 로드(또는 캐시에서 복원)될 때 현재 앱 테마를 강제로 한번 밀어넣음
       try {
@@ -1695,10 +1690,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
       alert("현재 감상 중인 소설 텍스트가 존재하지 않아 신고할 수 없습니다.");
       return;
     }
-    if (isPage && !novelHtmlResult) {
-      alert("현재 번역된 웹페이지 결과가 존재하지 않아 신고할 수 없습니다.");
-      return;
-    }
+    
 
     const confirmReport = window.confirm(
       "현재 화면의 번역 결과(원본 문장, 번역문, 소설 주소, 번역 모델 등)를 개발자에게 피드백으로 전송하시겠습니까?\n\n*개인 API Key 등의 정보는 절대 포함되지 않으며 익명으로 안전하게 전송됩니다.",
@@ -1739,7 +1731,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
           ...payload,
           mode: "page",
           title: "웹페이지 번역 결과",
-          htmlSnippet: novelHtmlResult.slice(0, 50000),
+          htmlSnippet: "",
         };
       }
 
@@ -2580,21 +2572,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
                 <div
                   style={{ display: "flex", gap: "6px", marginLeft: "auto" }}
                 >
-                  <button
-                    onClick={() => startPageTranslation(inputUrl, true)}
-                    style={{
-                      background: "var(--border-main)",
-                      border: "1px solid #81c784",
-                      color: "var(--primary)",
-                      padding: "3px 8px",
-                      borderRadius: "5px",
-                      cursor: "pointer",
-                      fontSize: "11px",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    재번역
-                  </button>
+                  
                   <button
                     onClick={handleReportFeedback}
                     style={{
