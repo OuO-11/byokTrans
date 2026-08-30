@@ -66,6 +66,12 @@ class WebViewManager {
                 this.browser.executeScript({ code: `window.postMessage(${resMsg}, '*');` });
              }
           });
+          
+          // 번역이 성공적으로 끝났을 때(혹은 App.jsx 내부에서 에러를 삼켰을 때) 명시적으로 DONE 전송
+          if (this.browser) {
+             const resMsg = JSON.stringify({ type: 'TRANSLATE_STREAM_DONE', data: [] });
+             this.browser.executeScript({ code: `window.postMessage(${resMsg}, '*');` });
+          }
         } catch (err) {
           console.error("Translation stream callback failed", err);
           if (this.browser) {
