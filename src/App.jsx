@@ -1101,251 +1101,137 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
 
         const translatedList = new Array(paragraphs.length).fill("");
 
-        let doneTranslation = false;
-        let continuationCount = 0;
-        const maxContinuationAttempts = 4;
+        // Colomo Auto-Pagination with Base-52
+          function toBase52(num) {
+            const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+            let res = ""; do { res = chars[num % 52] + res; num = Math.floor(num / 52); } while (num > 0);
+            return res;
+          }
 
-        while (
-          !doneTranslation &&
-          continuationCount < maxContinuationAttempts
-        ) {
-          const pendingIndices = [];
-          paragraphs.forEach((p, idx) => {
-            if (
-              translatedList[idx] === "" ||
-              translatedList[idx] === undefined
-            ) {
-              pendingIndices.push(idx);
-            }
+          // Check if it's a continuation or new
+          const startIndex = paragraphs.findIndex((p, idx) => translatedList[idx] === "" || translatedList[idx] === undefined);
+          const isContinuation = startIndex > 0;
+          const paragraphsToSend = paragraphs.slice(startIndex >= 0 ? startIndex : 0);
+          
+          let payloadText = "";
+          paragraphsToSend.forEach((p, i) => {
+             payloadText += `<|${toBase52((startIndex >= 0 ? startIndex : 0) + i)}|> ${p.original || p}\n`;
           });
 
-          if (pendingIndices.length === 0) {
-            doneTranslation = true;
-            break;
-          }
-
-          console.log(
-            `[Translation Continuation #${continuationCount + 1}] Processing ${pendingIndices.length} pending paragraphs...`,
-          );
-
-          if (continuationCount > 0) {
-            showToast(`응답 지연으로 재시도 중입니다... (${continuationCount}/${maxContinuationAttempts})`);
-          }
-
-          const idToIndex = {};
-          let joinedText = "";
-
-          if (streamTranslatedTitle === "AI 번역 대기 중...") {
-            joinedText += `<p id="TITLE">${title.trim()}</p>\n`;
-          }
-
-          joinedText += pendingIndices
-            .map((idx) => {
-              const b52 = getBase52Id(idx);
-              idToIndex[b52] = idx;
-              return `<p id="${b52}">${paragraphs[idx].trim()}</p>`;
-            })
-            .join("\n");
-          const pendingRawText = joinedText;
+          let buffer = "";
+          let lastProcessedIndex = -1;
+          let processedIds = new Set();
 
           try {
-            let fullAiTextBuffer = "";
-
-            const handleStreamChunk = (chunk) => {
-              fullAiTextBuffer = chunk;
-
-              // [45단계 핵심] 정규식 매칭 실패에 따른 스트리밍 지연 방지를 위해 split() 기반 파싱 사용
-              const chunksByTag = fullAiTextBuffer.split(/<p\s+id=['"]?([A-Za-z]+)['"]?>/);
-              let maxProcessedIndex = -1;
-
-              // chunksByTag는 ["", "A", "내용...", "B", "내용...", ...] 형태로 쪼개짐
-              for (let i = 1; i < chunksByTag.length; i += 2) {
-                const b52 = chunksByTag[i];
-                
-                let text = chunksByTag[i + 1] || "";
-                // 닫는 태그(</p>) 이후의 찌꺼기 문자열이 있다면 제거
-                text = text.replace(/<\/p>[\s\S]*$/, "").trim();
-
-                if (b52 === "TITLE") {
-                  if (text && text !== streamTranslatedTitle) {
-                    streamTranslatedTitle = text;
-                    const newCombinedTitle = `${text} / ${title.trim()}`;
-                    setViewerTitle(newCombinedTitle);
-                    
-                    // 제목 번역이 완료되면 DB에도 제목을 업데이트합니다.
-                    if (novelId) {
-                      getNovel(novelId).then(currentNovel => {
-                        if (currentNovel) {
-                          // 이미 보관함의 제목에 " / " (번역완료) 패턴이 있으면 DB 쓰기 생략
-                          if (!currentNovel.title.includes(" / ")) {
-                            saveNovel({
-                              ...currentNovel,
-                              title: newCombinedTitle,
-                            }).catch(e => console.warn("DB Title Update Error:", e));
-                          }
-                        }
-                      }).catch(e => console.warn("DB Novel Fetch Error:", e));
-                    }
-                  }
-                  continue;
-                }
-
-                const idx = idToIndex[b52];
-                if (idx === undefined) continue;
-
-                if (pendingIndices.includes(idx)) {
-                  translatedList[idx] = text;
-                  if (idx > maxProcessedIndex) maxProcessedIndex = idx;
-                }
-              }
-
-              setViewerParagraphs((prev) => {
-                const next = [...prev];
-                paragraphs.forEach((orig, idx) => {
-                  if (
-                    translatedList[idx] !== undefined &&
-                    translatedList[idx] !== ""
-                  ) {
-                    next[idx] = {
-                      original: orig,
-                      translated: translatedList[idx],
-                    };
-                  } else if (
-                    pendingIndices.includes(idx) &&
-                    idx <= maxProcessedIndex
-                  ) {
-                    next[idx] = {
-                      original: orig,
-                      translated: "AI 번역 가동 중...",
-                    };
-                  } else if (pendingIndices.includes(idx)) {
-                    next[idx] = {
-                      original: orig,
-                      translated: "AI 번역 대기 중...",
-                    };
-                  }
-                });
-                return next;
-              });
-
-              const completedCount = translatedList.filter(
-                (t) => t !== "",
-              ).length;
-              const percent = Math.min(
-                Math.round((completedCount / paragraphs.length) * 100),
-                99,
-              );
-              setTransProgress(percent);
-            };
-
             await translateTextStreamWithRotation(
-              pendingRawText,
-              finalSystemPrompt,
-              selectedModel,
-              handleStreamChunk,
-              translationAbortControllerRef.current.signal,
-              '<main id="번역">\n',
-            );
-          } catch (streamErr) {
-            console.warn(
-              `[Stream Continuation Warning] Attempt ${continuationCount + 1} encountered error:`,
-              streamErr,
+              payloadText, 
+              finalSystemPrompt, 
+              selectedModel, 
+              (chunk) => {
+                buffer += chunk;
+                const regex = /<\|([A-Za-z]+)\|>\s*([\s\S]*?)(?=<\|[A-Za-z]+\|>|$)/g;
+                let match;
+                const newTranslations = {};
+                let lastParsedIndex = 0;
+                
+                while ((match = regex.exec(buffer)) !== null) {
+                    const idStr = match[1];
+                    const text = match[2];
+                    if (match.index + match[0].length < buffer.length) {
+                        if (!processedIds.has(idStr)) {
+                            let idNum = 0;
+                            const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+                            for (let i = 0; i < idStr.length; i++) {
+                               idNum = idNum * 52 + chars.indexOf(idStr[i]);
+                            }
+                            newTranslations[idNum] = text.trim();
+                            lastProcessedIndex = Math.max(lastProcessedIndex, idNum);
+                            processedIds.add(idStr);
+                            lastParsedIndex = match.index + match[0].length;
+                        }
+                    }
+                }
+
+                if (lastParsedIndex > 0) {
+                    buffer = buffer.slice(lastParsedIndex);
+                }
+
+                if (Object.keys(newTranslations).length > 0) {
+                    setViewerParagraphs(prev => {
+                        const next = [...prev];
+                        for (const [idx, text] of Object.entries(newTranslations)) {
+                            if (next[idx]) next[idx].translated = text;
+                        }
+                        return next;
+                    });
+                    
+                    const percent = Math.min(Math.round((((startIndex >= 0 ? startIndex : 0) + processedIds.size) / paragraphs.length) * 100), 99);
+                    setTransProgress(percent);
+                }
+              },
+              translationAbortControllerRef.current.signal
             );
 
-            if (
-              cancelTranslationRef.current ||
-              streamErr.message?.includes("중단")
-            ) {
-              throw streamErr;
+            if (!translationAbortControllerRef.current.signal.aborted && buffer.length > 0) {
+                const flushRegex = /<\|([A-Za-z]+)\|>\s*([\s\S]*?)(?=<\|[A-Za-z]+\|>|$)/g;
+                let flushMatch;
+                const finalTranslations = {};
+                while ((flushMatch = flushRegex.exec(buffer)) !== null) {
+                    const idStr = flushMatch[1];
+                    if (!processedIds.has(idStr)) {
+                        let idNum = 0;
+                        const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+                        for (let i = 0; i < idStr.length; i++) {
+                           idNum = idNum * 52 + chars.indexOf(idStr[i]);
+                        }
+                        finalTranslations[idNum] = flushMatch[2].trim();
+                        lastProcessedIndex = Math.max(lastProcessedIndex, idNum);
+                        processedIds.add(idStr);
+                    }
+                }
+                setViewerParagraphs(prev => {
+                    const next = [...prev];
+                    for (const [idx, text] of Object.entries(finalTranslations)) {
+                        if (next[idx]) next[idx].translated = text;
+                    }
+                    return next;
+                });
             }
 
-            const errMsg = streamErr.message || "";
-
-            if (errMsg.includes("ALL_KEYS_EXHAUSTED")) {
-              alert(
-                `[API 할당량 소진] 모든 API Key의 무료 제공량이 초과되었습니다.\n잠시 후 다시 시도해 주세요.`,
-              );
-              break;
-            } else if (errMsg.includes("[NON_RETRIABLE_SAFETY]")) {
-              alert(
-                `[안전망 차단됨] 구글 AI 필터에 의해 일부 내용의 번역이 강제 차단되었습니다.\n차단된 부분은 원문으로 표시되며 이후 내용은 계속 번역됩니다.`,
-              );
-              // 첫 번째 대기 중인 문단을 차단 처리 후 루프 강제 속행
-              if (pendingIndices.length > 0) {
-                translatedList[pendingIndices[0]] =
-                  `[번역 불가: 구글 AI 안전 정책 차단] ${paragraphs[pendingIndices[0]]}`;
-              }
-            } else if (errMsg.includes("status: 400")) {
-              const userAgreed = window.confirm(
-                `[API 요청 오류] 번역 요청 중 치명적인 문법/구조 오류가 발생했습니다.\n사유: status: 400 - ai 응답 차단\n\n서버로 상세 오류 내역을 전송하시겠습니까?`,
-              );
-              if (userAgreed) {
-                fetch("https://byoktrans.vercel.app/api/report_feedback", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    time: new Date().toISOString(),
-                    url: targetUrl,
-                    memo:
-                      "AUTO-FATAL-REPORT: " +
-                      (streamErr.message || String(streamErr)),
-                  }),
-                }).catch(() => {});
-              }
-              break;
+            if (lastProcessedIndex < paragraphs.length - 1 && lastProcessedIndex !== -1 && !translationAbortControllerRef.current.signal.aborted) {
+                console.log(`[Auto-Pagination] Cutoff at ${lastProcessedIndex}. Requesting continuation...`);
+                setTimeout(() => {
+                    if (translationAbortControllerRef.current && translationAbortControllerRef.current.signal.aborted) return;
+                    startViewerTranslation(targetUrl, forceChapter, bypassCache, false, lastProcessedIndex + 1);
+                }, 1000);
             } else {
-              if (continuationCount === maxContinuationAttempts - 1) {
-                alert(
-                  `[네트워크 오류] 일시적인 서버 불안정으로 번역이 실패했습니다.\n사유: ${errMsg}\n잠시 후 다시 시도해 주세요.`,
-                );
-              } else {
-                await new Promise((r) => setTimeout(r, 2500));
-              }
+                setTransProgress(100);
+                setIsTranslating(false);
+                
+                if (translationSessionIdRef.current === currentSessionId && activeViewerNovelId) {
+                   const finalParagraphs = [];
+                   setViewerParagraphs(prev => {
+                       finalParagraphs.push(...prev);
+                       return prev;
+                   });
+                   
+                   setTimeout(async () => {
+                       await saveEpisode({
+                         novelId: activeViewerNovelId,
+                         chapterUrl: targetUrl,
+                         chapter: chapterToUse,
+                         title: title,
+                         originalText: JSON.stringify(finalParagraphs),
+                         translatedText: JSON.stringify(finalParagraphs),
+                         updatedAt: Date.now(),
+                       });
+                   }, 500);
+                }
             }
+          } catch (streamErr) {
+             console.warn("Viewer translation error", streamErr);
+             setIsTranslating(false);
           }
-
-          continuationCount++;
-        }
-
-        setViewerParagraphs((prev) => {
-          return prev.map((p, idx) => {
-            const finalTrans = translatedList[idx];
-            const hasDummy =
-              finalTrans === "AI 번역 대기 중..." ||
-              finalTrans === "AI 번역 가동 중..." ||
-              !finalTrans;
-            return {
-              original: p.original,
-              translated: hasDummy
-                ? `${p.original} (번역 실패/미완료)`
-                : finalTrans,
-            };
-          });
-        });
-
-        const successCount = translatedList.filter(
-          (t) =>
-            t &&
-            t.length > 0 &&
-            t !== "AI 번역 대기 중..." &&
-            t !== "AI 번역 가동 중...",
-        ).length;
-        if (successCount >= paragraphs.length * 0.8) {
-          const pairList = paragraphs.map((orig, idx) => ({
-            original: orig,
-            translated: translatedList[idx] || `${orig} (번역 실패/미완료)`,
-          }));
-          await saveEpisode(
-            novelId,
-            chapterToUse,
-            JSON.stringify(pairList),
-            "",
-          );
-        } else {
-          console.warn(
-            `[Cache Aborted] Translation success rate too low (${successCount}/${paragraphs.length}). Not saving to DB.`,
-          );
-        }
       }
 
       getNovels().then(setNovels);
@@ -1359,6 +1245,102 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
     } finally {
       setIsTranslating(false);
       getCacheStatistics().then(setCacheStats);
+    }
+  };
+
+
+  const handleTranslateStart = () => {
+    const finalMode = isNovelEpisodeUrl(inputUrl) ? "viewer" : "page";
+    
+    if (finalMode === "page") {
+      webViewManager.openNovel({
+        url: inputUrl,
+        onNavigate: (url) => { 
+          if (isNovelEpisodeUrl(url)) {
+            webViewManager.destroy(); 
+            startViewerTranslation(url, detectChapterFromUrl(url), true);
+          }
+        },
+        onAbort: () => {
+          cancelTranslationRef.current = true;
+          if (translationAbortControllerRef.current) translationAbortControllerRef.current.abort();
+        },
+        onTranslateStreamReq: async (payloadText, onUpdate) => {
+          translationAbortControllerRef.current = new AbortController();
+          const signal = translationAbortControllerRef.current.signal;
+          
+          setIsTranslating(true);
+          const prompt = `${basePrompts[selectedLang] || ""}\n\nIMPORTANT: You must output ONLY the translated text inside the exact <|ID|> markers. Do not skip any marker. Keep the formatting.`;
+          
+          let buffer = "";
+          let processedIds = new Set();
+
+          try {
+            await translateTextStreamWithRotation(
+              payloadText, 
+              prompt, 
+              selectedModel, 
+              (chunk) => {
+                if (signal.aborted) return;
+                buffer += chunk;
+                
+                const updates = [];
+                const regex = /<\|([A-Za-z]+)\|>\s*([\s\S]*?)(?=<\|[A-Za-z]+\|>|$)/g;
+                let match;
+                let lastParsedIndex = 0;
+
+                while ((match = regex.exec(buffer)) !== null) {
+                  const id = match[1];
+                  const text = match[2];
+                  if (match.index + match[0].length < buffer.length) {
+                      if (!processedIds.has(id)) {
+                          updates.push({ id, text: text.trim() });
+                          processedIds.add(id);
+                          lastParsedIndex = match.index + match[0].length;
+                      }
+                  }
+                }
+                
+                if (lastParsedIndex > 0) {
+                    buffer = buffer.slice(lastParsedIndex);
+                }
+                
+                if (updates.length > 0) {
+                  onUpdate(updates, false);
+                }
+              },
+              signal
+            );
+
+            if (!signal.aborted) {
+                const updates = [];
+                const regex = /<\|([A-Za-z]+)\|>\s*([\s\S]*?)(?=<\|[A-Za-z]+\|>|$)/g;
+                let match;
+                while ((match = regex.exec(buffer)) !== null) {
+                    const id = match[1];
+                    const text = match[2];
+                    if (!processedIds.has(id)) {
+                        updates.push({ id, text: text.trim() });
+                        processedIds.add(id);
+                    }
+                }
+                onUpdate(updates, true);
+                setIsTranslating(false);
+            }
+          } catch (err) {
+            console.error("Stream error", err);
+            onUpdate([], true);
+            setIsTranslating(false);
+          }
+        },
+        onClose: () => {
+           setIsTranslating(false);
+        }
+      });
+    } else {
+      setTransMode(finalMode);
+      setActiveViewerChapter(detectChapterFromUrl(inputUrl));
+      startViewerTranslation(inputUrl, detectChapterFromUrl(inputUrl), true);
     }
   };
 
