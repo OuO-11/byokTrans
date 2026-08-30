@@ -1366,271 +1366,6 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
     }
   };
 
-  const startPageTranslation = async (
-    targetUrl,
-    bypassCache = false,
-    fromPopState = false,
-  ) => {
-    const activeKey = getActiveApiKey();
-    if (!activeKey) {
-      alert("API Key를 먼저 설정에서 1개 이상 등록해 주세요.");
-      setActiveTab("presets");
-      return;
-    }
-
-    startPageTranslationRef.current = startPageTranslation;
-
-    translationSessionIdRef.current += 1;
-    const currentSessionId = translationSessionIdRef.current;
-
-    setIsTranslating(true);
-    setTransProgress(5);
-    cancelTranslationRef.current = false;
-    translationAbortControllerRef.current = new AbortController();
-    // [FIX] Do NOT clear novelHtmlResult here. If we clear it, the iframe turns blank (black screen in dark mode)
-    // while waiting for the fetch. By keeping the old HTML, it behaves gracefully like before.
-
-    const basePrompt = basePrompts[selectedLang] || "";
-    const rawSubPrompt =
-      selectedPreset === "default"
-        ? ""
-        : getPromptContent(selectedLang, selectedPreset);
-
-    if (!bypassCache && pageCacheRef.current[targetUrl]) {
-      setTransProgress(100);
-      setIsTranslating(false);
-      setIframeKey((prev) => prev + 1);
-      setNovelHtmlResult(pageCacheRef.current[targetUrl]);
-      if (!fromPopState) {
-        window.history.pushState(
-          {
-            isAppInternal: true,
-            url: targetUrl,
-            mode: "pageResult",
-            chapter: null,
-          },
-          "",
-        );
-      }
-      setActiveTab("pageResult");
-      return;
-    }
-
-    try {
-      setTransProgress(20);
-      let data;
-      if (Capacitor.isNativePlatform()) {
-        data = await fetchNativeDirect(targetUrl);
-      } else {
-        const res = await fetch(
-          `/api/proxy?url=${encodeURIComponent(targetUrl)}`,
-        );
-        if (!res.ok) throw new Error("CORS 프록시 서버 통신 실패");
-        data = await res.json();
-      }
-
-      if (data?.error) throw new Error(data.error);
-
-      const activeSubPrompt = filterActiveGlossary(rawSubPrompt, data.html);
-      const finalSystemPrompt = activeSubPrompt
-        ? `${basePrompt}\n\n[추가 특정 작품/용어 사전 지침]\n${activeSubPrompt}`
-        : basePrompt;
-
-      setPageSystemPrompt(finalSystemPrompt);
-      setTransProgress(5);
-
-      // 웹페이지 테마 제어 스크립트 강제 주입 (Darkreader 연동 + 실시간 동기화)
-      const themeScript = `
-        <style>
-           html { transition: background-color 0.3s; }
-           html[data-iframe-theme="dark"] { background-color: #121310 !important; }
-           html[data-iframe-theme="light"] { background-color: #ffffff !important; }
-        </style>
-        <script>${darkReaderCodeRawString}</script>
-        <script>
-          window.applyIframeTheme = function(theme) {
-            document.documentElement.setAttribute('data-iframe-theme', theme);
-            if (typeof DarkReader !== 'undefined') {
-              if (theme === 'dark') {
-                DarkReader.enable({ brightness: 100, contrast: 90, sepia: 10 });
-              } else {
-                DarkReader.disable();
-              }
-            }
-          };
-          // 초기 테마 설정
-          window.applyIframeTheme('${appTheme}');
-        </script>
-      `;
-
-      let themeInjectedHtml = data.html;
-      if (/<head[^>]*>/i.test(themeInjectedHtml)) {
-        themeInjectedHtml = themeInjectedHtml.replace(
-          /(<head[^>]*>)/i,
-          (match) =>
-            `${match}${themeScript}<meta name="color-scheme" content="${appTheme}">`,
-        );
-      } else if (/<html[^>]*>/i.test(themeInjectedHtml)) {
-        themeInjectedHtml = themeInjectedHtml.replace(
-          /(<html[^>]*>)/i,
-          (match) =>
-            `${match}<head>${themeScript}<meta name="color-scheme" content="${appTheme}"></head>`,
-        );
-      } else {
-        themeInjectedHtml =
-          `<head>${themeScript}<meta name="color-scheme" content="${appTheme}"></head>` +
-          themeInjectedHtml;
-      }
-
-      // [Frame Buster 무력화] 강제 리다이렉트를 막기 위해 top.location, parent.location 등을 로컬로 치환
-      themeInjectedHtml = themeInjectedHtml.replace(/(top|parent)\.location/g, "window.location");
-
-      setIframeKey((prev) => prev + 1);
-      setNovelHtmlResult(themeInjectedHtml);
-      if (!fromPopState) {
-        window.history.pushState(
-          {
-            isAppInternal: true,
-            url: targetUrl,
-            mode: "pageResult",
-            chapter: null,
-          },
-          "",
-        );
-      }
-      setActiveTab("pageResult");
-    } catch (err) {
-      if (cancelTranslationRef.current || err.name === "AbortError") {
-        console.log("[Translation] Cancelled by user.");
-      } else {
-        alert("번역 중 오류가 발생했습니다: " + err.message);
-        reportErrorToBackend(err, `startPageTranslation for ${targetUrl}`);
-      }
-      setIsTranslating(false);
-    }
-  };
-
-  // 수동 [번역 시작] 트리거
-  const handleTranslateStart = () => {
-    const finalMode = isNovelEpisodeUrl(inputUrl) ? "viewer" : "page";
-    
-    if (finalMode === "page") {
-      webViewManager.openNovel({
-        url: inputUrl,
-        onNavigate: (url) => { 
-          if (isNovelEpisodeUrl(url)) {
-            webViewManager.destroy(); 
-            startViewerTranslation(url, detectChapterFromUrl(url), true);
-          }
-        },
-        onAbort: () => {
-          cancelTranslationRef.current = true;
-          translationAbortControllerRef.current?.abort();
-        },
-        onTranslateStreamReq: async (payloadText, onUpdate) => {
-          translationAbortControllerRef.current = new AbortController();
-          const signal = translationAbortControllerRef.current.signal;
-          
-          setIsTranslating(true);
-          const prompt = `${basePrompts[selectedLang] || ""}\n\nIMPORTANT: You must output ONLY the translated text inside the exact <|ID|> markers. Do not skip any marker. Keep the formatting.`;
-          
-          let buffer = "";
-          let processedIds = new Set();
-
-          try {
-            await translateTextStreamWithRotation(
-              payloadText, 
-              prompt, 
-              selectedModel, 
-              (chunk) => {
-                if (signal.aborted) return;
-                buffer += chunk;
-                
-                const updates = [];
-                const regex = /<\|([A-Za-z]+)\|>\s*([\s\S]*?)(?=<\|[A-Za-z]+\|>|$)/g;
-                let match;
-                let lastParsedIndex = 0;
-
-                while ((match = regex.exec(buffer)) !== null) {
-                  const id = match[1];
-                  const text = match[2];
-                  if (match.index + match[0].length < buffer.length) {
-                      if (!processedIds.has(id)) {
-                          updates.push({ id, text: text.trim() });
-                          processedIds.add(id);
-                          lastParsedIndex = match.index + match[0].length;
-                      }
-                  }
-                }
-                
-                if (lastParsedIndex > 0) {
-                    buffer = buffer.slice(lastParsedIndex);
-                }
-                
-                if (updates.length > 0) {
-                  onUpdate(updates, false);
-                }
-              },
-              signal
-            );
-
-            if (!signal.aborted) {
-                const updates = [];
-                const regex = /<\|([A-Za-z]+)\|>\s*([\s\S]*?)(?=<\|[A-Za-z]+\|>|$)/g;
-                let match;
-                while ((match = regex.exec(buffer)) !== null) {
-                    const id = match[1];
-                    const text = match[2];
-                    if (!processedIds.has(id)) {
-                        updates.push({ id, text: text.trim() });
-                        processedIds.add(id);
-                    }
-                }
-                onUpdate(updates, true);
-                setIsTranslating(false);
-            }
-          } catch (err) {
-            console.error("Stream error", err);
-            onUpdate([], true);
-            setIsTranslating(false);
-          }
-        },
-        onClose: () => {
-           setIsTranslating(false);
-        }
-      });
-    } else {
-      setTransMode(finalMode);
-      setActiveViewerChapter(detectChapterFromUrl(inputUrl));
-      startViewerTranslation(inputUrl, detectChapterFromUrl(inputUrl), true);
-    }
-  };
-
-  // iframe 내부 링크 클릭 가로채기 핸들러
-  const handleIframeNavigate = (clickedUrl) => {
-    // 이전 페이지의 번역 가동을 선제적으로 취소하여 렉 및 충돌 방지
-    cancelTranslationRef.current = true;
-    translationAbortControllerRef.current?.abort();
-    translationSessionIdRef.current += 1; // 웹페이지 모드 전용 세션 강제 만료
-
-    const originalAbsoluteUrl = resolveAbsoluteUrl(
-      inputUrlRef.current,
-      clickedUrl,
-    );
-
-    if (isNovelEpisodeUrl(originalAbsoluteUrl)) {
-      const detectedChapter = detectChapterFromUrl(originalAbsoluteUrl);
-      setInputUrl(originalAbsoluteUrl);
-      setTransMode("viewer");
-      setActiveViewerChapter(detectedChapter);
-      startViewerTranslation(originalAbsoluteUrl, detectedChapter);
-    } else {
-      setInputUrl(originalAbsoluteUrl);
-      setTransMode("page");
-      startPageTranslation(originalAbsoluteUrl);
-    }
-  };
-
   // iframe 로드 완료 시 이벤트 캡처 주입
   const handleIframeLoad = (e) => {
     try {
@@ -1725,19 +1460,83 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
     setInputUrl(targetUrl);
 
     const isEpisode = isNovelEpisodeUrl(targetUrl);
-    const detectedChapter = detectChapterFromUrl(targetUrl);
     const finalMode = isEpisode ? "viewer" : "page";
 
-    setTransMode(finalMode);
-    if (isEpisode) {
-      setActiveViewerChapter(detectedChapter);
-    }
-
-    // 즉시 실시간 스트리밍 번역 구동
     if (finalMode === "viewer") {
-      startViewerTranslation(targetUrl, isEpisode ? detectedChapter : null);
+      setTransMode("viewer");
+      const detectedChapter = detectChapterFromUrl(targetUrl);
+      setActiveViewerChapter(detectedChapter);
+      startViewerTranslation(targetUrl, detectedChapter);
     } else {
-      startPageTranslation(targetUrl);
+      webViewManager.openNovel({
+        url: targetUrl,
+        onNavigate: (url) => { 
+          if (isNovelEpisodeUrl(url)) {
+            webViewManager.destroy(); 
+            startViewerTranslation(url, detectChapterFromUrl(url), true);
+          }
+        },
+        onAbort: () => {
+          cancelTranslationRef.current = true;
+          translationAbortControllerRef.current?.abort();
+        },
+        onTranslateStreamReq: async (payloadText, onUpdate) => {
+          translationAbortControllerRef.current = new AbortController();
+          const signal = translationAbortControllerRef.current.signal;
+          
+          setIsTranslating(true);
+          const prompt = `${basePrompts[selectedLang] || ""}\n\nIMPORTANT: You must output ONLY the translated text inside the exact <|ID|> markers. Do not skip any marker. Keep the formatting.`;
+          
+          let buffer = "";
+          let processedIds = new Set();
+
+          try {
+            await translateTextStreamWithRotation(
+              payloadText, 
+              prompt, 
+              selectedModel, 
+              (chunk) => {
+                buffer += chunk;
+                const updates = [];
+                const regex = /<\|([A-Za-z]+)\|>\s*([\s\S]*?)(?=<\|[A-Za-z]+\|>|$)/g;
+                
+                let match;
+                let lastParsedIndex = 0;
+                while ((match = regex.exec(buffer)) !== null) {
+                  const id = match[1];
+                  let text = match[2].trim();
+                  
+                  // if not the last match, or buffer ended with marker
+                  if (regex.lastIndex !== buffer.length || match[0].includes("<|")) {
+                     updates.push({ id, text });
+                     processedIds.add(id);
+                     lastParsedIndex = regex.lastIndex;
+                  }
+                }
+                
+                if (updates.length > 0) {
+                  onUpdate(updates);
+                  buffer = buffer.slice(lastParsedIndex);
+                }
+              },
+              signal
+            );
+            
+            if (buffer.trim()) {
+               const regex = /<\|([A-Za-z]+)\|>\s*([\s\S]*)$/g;
+               const match = regex.exec(buffer);
+               if (match) {
+                   onUpdate([{ id: match[1], text: match[2].trim() }]);
+               }
+            }
+            
+          } catch (e) {
+            console.error(e);
+          } finally {
+            setIsTranslating(false);
+          }
+        }
+      });
     }
   };
 
@@ -2230,7 +2029,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
             style={{ display: "flex", flexDirection: "column", gap: "20px" }}
           >
             <h3 style={{ margin: 0, fontSize: "18px", fontWeight: "bold" }}>
-              번역 런처 시작 시작
+              번역 런처 시작
             </h3>
 
             <div
@@ -4423,7 +4222,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
       >
         {[
           { id: "library", label: "보관함", icon: FolderHeart },
-          { id: "translate", label: "홈", icon: BookOpen },
+          { id: "translate", label: "홈", icon: Home },
           { id: "presets", label: "번역 설정", icon: Settings },
           { id: "info", label: "이용 안내", icon: Info },
         ].map((tab) => {

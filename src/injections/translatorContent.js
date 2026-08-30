@@ -54,7 +54,7 @@
   btnClose.style.cursor = 'pointer';
 
   const btnTranslate = document.createElement('div');
-  btnTranslate.innerHTML = '🌐 번역';
+  btnTranslate.innerHTML = '웹 번역';
   btnTranslate.style.cursor = 'pointer';
   btnTranslate.style.fontWeight = 'bold';
   btnTranslate.style.padding = '6px 12px';
@@ -88,16 +88,18 @@
   remote.addEventListener('touchcancel', onDragEnd);
   
   btnClose.onclick = () => {
-      clearInterval(trapInterval); // 치명타 5 해결: 리모컨 닫을 때 setInterval 해제
+      clearInterval(trapInterval); // 치명적 5 해결: 리모컨 닫을 때 setInterval 해제
       const msg = JSON.stringify({ type: 'CLOSE_WEBVIEW' });
       if (window.webkit?.messageHandlers?.cordova_iab) window.webkit.messageHandlers.cordova_iab.postMessage(msg);
       else if (window.cordova_iab) window.cordova_iab.postMessage(msg);
       else container.remove();
   };
 
-  // 3. Colomo Parser (Base-52 + 1-Shot Streaming)
-  const EXCLUDE_TAGS = ['SCRIPT', 'STYLE', 'LINK', 'META', 'HEAD', 'NOSCRIPT', 'TEMPLATE', 'IFRAME'];
-  let textNodeMap = new Map();
+  // 3. Colomo Parser (Base-52 + 1-Shot Streaming with Block Merging)
+  const EXCLUDE_TAGS = ['SCRIPT', 'STYLE', 'LINK', 'META', 'HEAD', 'NOSCRIPT', 'TEMPLATE', 'IFRAME', 'SVG', 'CANVAS'];
+  const INLINE_TAGS = new Set(['A', 'SPAN', 'B', 'STRONG', 'I', 'EM', 'U', 'S', 'MARK', 'SUB', 'SUP', 'SMALL', 'DEL', 'INS', 'FONT', 'LABEL', 'ABBR', 'CITE', 'Q', 'CODE']);
+  
+  let groupMap = new Map();
   let fallbackTimeout = null;
 
   function toBase52(num) {
@@ -110,92 +112,185 @@
     return res;
   }
 
+  function isInlineNode(node) {
+    if (node.nodeType === Node.TEXT_NODE) return true;
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      if (!INLINE_TAGS.has(node.tagName.toUpperCase())) return false;
+      for (let child of node.childNodes) {
+        if (!isInlineNode(child)) return false;
+      }
+      return true;
+    }
+    return false;
+  }
+
+  function isHidden(node) {
+    if (node.nodeType !== Node.ELEMENT_NODE) node = node.parentElement;
+    if (!node) return false;
+    // Use getClientRects to avoid layout thrashing while still correctly skipping non-rendered flex/inline items
+    if (node.getClientRects && node.getClientRects().length === 0) return true;
+    return false;
+  }
+
   btnTranslate.onclick = () => {
     if (btnTranslate.dataset.translating === 'true') return;
     btnTranslate.dataset.translating = 'true';
-    btnTranslate.innerHTML = '⏳ 번역중...';
+    btnTranslate.innerHTML = '번역중...';
     btnTranslate.style.background = '#FF9800';
 
-    textNodeMap.clear();
-    const textNodes = [];
-    
+    groupMap.clear();
+    let idCounter = 0;
+    let payloadText = "";
+
+    function processGroup(group) {
+      if (group.length === 0) return;
+
+      let template = "";
+      let elements = [];
+      let elementIndex = 0;
+
+      function buildVirtual(node) {
+        if (node.nodeType === Node.TEXT_NODE) {
+          let text = node.nodeValue || "";
+          template += text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        } else if (node.nodeType === Node.ELEMENT_NODE) {
+          const idx = elementIndex++;
+          elements.push(node);
+          template += `<v${idx}>`;
+          for (let child of node.childNodes) buildVirtual(child);
+          template += `</v${idx}>`;
+        }
+      }
+
+      for (let node of group) buildVirtual(node);
+
+      const plainText = template.replace(/<v\\d+>|<\\/v\\d+>/g, "").trim();
+      if (plainText.length > 0 && isNaN(plainText)) {
+        const b52 = toBase52(idCounter++);
+        groupMap.set(b52, { group, elements, parent: group[0].parentNode, anchor: group[group.length - 1].nextSibling });
+        
+        const safeTemplate = template.replace(/\\n/g, ' ');
+        payloadText += \`<|\${b52}|> \${safeTemplate}\\n\`;
+      }
+    }
+
     function walk(node) {
       if (node.nodeType === Node.ELEMENT_NODE) {
         if (EXCLUDE_TAGS.includes(node.tagName.toUpperCase())) return;
-        // Colomo: 숨김 태그 가볍게 스킵 (Blue Team 피드백: offsetWidth 사용)
-        if (node.offsetWidth === 0 && node.offsetHeight === 0) return;
+        if (isHidden(node)) return;
       }
-      if (node.nodeType === Node.TEXT_NODE) {
-        const text = node.nodeValue.trim();
-        if (text.length > 0 && isNaN(text)) {
-           if (node.parentElement && node.parentElement.offsetWidth === 0 && node.parentElement.offsetHeight === 0) return;
-           textNodes.push(node);
+
+      let currentGroup = [];
+      let children = Array.from(node.childNodes);
+
+      for (let child of children) {
+        if (isInlineNode(child)) {
+          currentGroup.push(child);
+        } else {
+          if (currentGroup.length > 0) {
+            processGroup(currentGroup);
+            currentGroup = [];
+          }
+          if (child.nodeType === Node.ELEMENT_NODE) {
+            walk(child);
+          }
         }
       }
-      let child = node.firstChild;
-      while (child) {
-        walk(child);
-        child = child.nextSibling;
-      }
+      if (currentGroup.length > 0) processGroup(currentGroup);
     }
+    
     walk(document.body);
 
-    if (textNodes.length === 0) {
+    if (idCounter === 0) {
       finishTranslation();
       return;
     }
-
-    let payloadText = "";
-    textNodes.forEach((node, index) => {
-      const b52 = toBase52(index);
-      textNodeMap.set(b52, node);
-      // Colomo: 줄바꿈 제거 및 <| |> 마커 부착
-      const safeText = node.nodeValue.trim().replace(/\n/g, ' '); 
-      payloadText += `<|${b52}|> ${safeText}\n`;
-    });
 
     const msg = JSON.stringify({ type: 'TRANSLATE_STREAM_REQ', data: payloadText });
     if (window.webkit?.messageHandlers?.cordova_iab) window.webkit.messageHandlers.cordova_iab.postMessage(msg);
     else if (window.cordova_iab) window.cordova_iab.postMessage(msg);
     else window.parent.postMessage(msg, '*');
 
-    // 치명타 2 방어: 웹뷰 무한 대기 (좀비화) 방지 타임아웃
     fallbackTimeout = setTimeout(() => {
        if (btnTranslate.dataset.translating === 'true') {
            finishTranslation();
        }
-    }, 60000); // 60초 후 강제 복구
+    }, 60000); 
   };
 
   function finishTranslation() {
       btnTranslate.dataset.translating = 'false';
-      btnTranslate.innerHTML = '✅ 완료';
+      btnTranslate.innerHTML = '번역완료';
       btnTranslate.style.background = '#4CAF50';
       if (fallbackTimeout) clearTimeout(fallbackTimeout);
-      textNodeMap.clear(); // 치명타 6 해결: 가비지 컬렉터가 메모리 회수하도록 강제 참조 해제
+      groupMap.clear(); // 가비지 컬렉터 메모리 회수 유도
       setTimeout(() => { 
-          btnTranslate.innerHTML = '🌐 번역'; 
+          btnTranslate.innerHTML = '웹 번역'; 
           btnTranslate.style.background = 'linear-gradient(135deg, #81c784, #83c5be)'; 
       }, 3000);
   }
 
   // Streaming Receiver
+  const parser = new DOMParser();
   window.addEventListener('message', (event) => {
     try {
       const msg = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
       if (msg.type === 'TRANSLATE_STREAM_UPDATE' || msg.type === 'TRANSLATE_STREAM_DONE') {
         const updates = msg.data || [];
         updates.forEach(item => {
-           const node = textNodeMap.get(item.id);
-           if (node && node.isConnected) {
-               node.nodeValue = item.text;
+           const instance = groupMap.get(item.id);
+           if (!instance) return;
+
+           const { group, elements, parent, anchor } = instance;
+           if (!parent) return;
+
+           const doc = parser.parseFromString(\`<div>\${item.text}</div>\`, "text/html");
+           const wrapper = doc.body.firstChild;
+
+           function reconstruct(parsedNode) {
+             if (parsedNode.nodeType === Node.TEXT_NODE) {
+               return document.createTextNode(parsedNode.nodeValue);
+             } else if (parsedNode.nodeType === Node.ELEMENT_NODE) {
+               const match = parsedNode.tagName.toUpperCase().match(/^V(\\d+)$/);
+               if (match) {
+                 const idx = parseInt(match[1], 10);
+                 const origEl = elements[idx];
+                 if (origEl) {
+                   while (origEl.firstChild) origEl.removeChild(origEl.firstChild);
+                   for (let child of Array.from(parsedNode.childNodes)) {
+                     origEl.appendChild(reconstruct(child));
+                   }
+                   return origEl;
+                 }
+               }
+               return document.createTextNode(parsedNode.textContent || "");
+             }
+             return document.createTextNode("");
            }
+
+           const newGroup = [];
+           for (let parsedChild of Array.from(wrapper.childNodes)) {
+             newGroup.push(reconstruct(parsedChild));
+           }
+
+           const frag = document.createDocumentFragment();
+           for (let newNode of newGroup) frag.appendChild(newNode);
+
+           for (let oldNode of group) {
+             if (oldNode.parentNode === parent) parent.removeChild(oldNode);
+           }
+
+           let targetAnchor = anchor;
+           if (targetAnchor && targetAnchor.parentNode !== parent) targetAnchor = null;
+           parent.insertBefore(frag, targetAnchor);
+
+           instance.group = newGroup; // Update reference for next stream chunk
         });
 
         if (msg.type === 'TRANSLATE_STREAM_DONE') {
           finishTranslation();
         }
       }
-    } catch (e) { }
+    } catch (e) { console.error(e) }
   });
 })();
