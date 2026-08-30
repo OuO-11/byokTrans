@@ -6,7 +6,8 @@ import { Filesystem, Directory } from "@capacitor/filesystem";
 import { Share } from "@capacitor/share";
 import { fetchNativeDirect } from "./nativeProxy";
 import {
-  Home,\n  BookOpen,
+  Home,
+  BookOpen,
   Settings,
   FolderHeart,
   Star,
