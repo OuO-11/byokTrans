@@ -1513,29 +1513,96 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
   // 수동 [번역 시작] 트리거
   const handleTranslateStart = () => {
     const finalMode = isNovelEpisodeUrl(inputUrl) ? "viewer" : "page";
-    setTransMode(finalMode);
     
-    // InAppBrowser 열기
-    webViewManager.openNovel({
-      url: inputUrl,
-      onNavigate: (url) => { console.log("Navigated to", url); },
-      onTranslateReq: async (data) => {
-         // 기존 번역 로직 연결점
-         console.log("Translation requested", data);
-         return []; // TODO: 실제 번역 API 연결
-      },
-      onClose: () => {
-         setActiveTab("translate"); // 홈으로 복귀
-      }
-    });
+    if (finalMode === "page") {
+      webViewManager.openNovel({
+        url: inputUrl,
+        onNavigate: (url) => { 
+          if (isNovelEpisodeUrl(url)) {
+            webViewManager.destroy(); 
+            startViewerTranslation(url, detectChapterFromUrl(url), true);
+          }
+        },
+        onAbort: () => {
+          cancelTranslationRef.current = true;
+          translationAbortControllerRef.current?.abort();
+        },
+        onTranslateStreamReq: async (payloadText, onUpdate) => {
+          translationAbortControllerRef.current = new AbortController();
+          const signal = translationAbortControllerRef.current.signal;
+          
+          setIsTranslating(true);
+          const prompt = `${basePrompts[selectedLang] || ""}\n\nIMPORTANT: You must output ONLY the translated text inside the exact <|ID|> markers. Do not skip any marker. Keep the formatting.`;
+          
+          let buffer = "";
+          let processedIds = new Set();
 
-    const detectedChapter = detectChapterFromUrl(inputUrl);
-    setActiveViewerChapter(detectedChapter);
+          try {
+            await translateTextStreamWithRotation(
+              payloadText, 
+              prompt, 
+              selectedModel, 
+              (chunk) => {
+                if (signal.aborted) return;
+                buffer += chunk;
+                
+                const updates = [];
+                const regex = /<\|([A-Za-z]+)\|>\s*([\s\S]*?)(?=<\|[A-Za-z]+\|>|$)/g;
+                let match;
+                let lastParsedIndex = 0;
 
-    if (finalMode === "viewer") {
-      startViewerTranslation(inputUrl, detectedChapter, true);
+                while ((match = regex.exec(buffer)) !== null) {
+                  const id = match[1];
+                  const text = match[2];
+                  if (match.index + match[0].length < buffer.length) {
+                      if (!processedIds.has(id)) {
+                          updates.push({ id, text: text.trim() });
+                          processedIds.add(id);
+                          lastParsedIndex = match.index + match[0].length;
+                      }
+                  }
+                }
+                
+                if (lastParsedIndex > 0) {
+                    buffer = buffer.slice(lastParsedIndex);
+                }
+                
+                if (updates.length > 0) {
+                  onUpdate(updates, false);
+                }
+              },
+              signal
+            );
+
+            if (!signal.aborted) {
+                const updates = [];
+                const regex = /<\|([A-Za-z]+)\|>\s*([\s\S]*?)(?=<\|[A-Za-z]+\|>|$)/g;
+                let match;
+                while ((match = regex.exec(buffer)) !== null) {
+                    const id = match[1];
+                    const text = match[2];
+                    if (!processedIds.has(id)) {
+                        updates.push({ id, text: text.trim() });
+                        processedIds.add(id);
+                    }
+                }
+                onUpdate(updates, true);
+                setIsTranslating(false);
+            }
+          } catch (err) {
+            console.error("Stream error", err);
+            onUpdate([], true);
+            setIsTranslating(false);
+          }
+        },
+        onClose: () => {
+           setIsTranslating(false);
+        }
+      });
     } else {
-      startPageTranslation(inputUrl, true);
+      setTransMode(finalMode);
+      setActiveViewerChapter(detectChapterFromUrl(inputUrl));
+      startViewerTranslation(inputUrl, detectChapterFromUrl(inputUrl), true);
     }
   };
 
@@ -2163,7 +2230,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
             style={{ display: "flex", flexDirection: "column", gap: "20px" }}
           >
             <h3 style={{ margin: 0, fontSize: "18px", fontWeight: "bold" }}>
-              홈 (번역 런처) 시작
+              번역 런처 시작 시작
             </h3>
 
             <div

@@ -3,168 +3,199 @@
   if (window.__TRANSLATOR_INJECTED) return;
   window.__TRANSLATOR_INJECTED = true;
 
-  let mutationTimeout = null;
-  const translationQueue = new Map(); // blockId -> { text, mappings }
-  let nodeCounter = 0;
-  const textNodeMap = new Map(); // textNodeId -> TextNode
+  let trapInterval = null;
 
-  const BLOCK_TAGS = new Set(['P', 'DIV', 'LI', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'TD', 'TH', 'BLOCKQUOTE', 'ARTICLE', 'SECTION', 'TR']);
-
-  function processBlock(element) {
-    if (element.hasAttribute('data-trans-state')) return;
-    element.setAttribute('data-trans-state', 'translating');
-
-    let blockText = '';
-    let hasText = false;
-    let localPlaceholderCount = 0;
-
-    const walker = document.createTreeWalker(element, NodeFilter.SHOW_ALL, {
-      acceptNode: function(node) {
-        if (node === element) return NodeFilter.FILTER_ACCEPT;
-        if (node.nodeType === Node.ELEMENT_NODE && BLOCK_TAGS.has(node.tagName)) {
-          return NodeFilter.FILTER_REJECT; // 중첩된 블록은 내부에서 알아서 처리하도록 스킵
+  // 1. 투명 덫 파괴 & iframe 무력화 (Anti-Hijacking)
+  function destroyTraps() {
+    const elements = document.querySelectorAll('*');
+    for (let el of elements) {
+      const style = window.getComputedStyle(el);
+      if (style.opacity !== '' && parseFloat(style.opacity) < 0.1 && !['SCRIPT', 'STYLE', 'META'].includes(el.tagName)) {
+        const rect = el.getBoundingClientRect();
+        if (rect.width > window.innerWidth * 0.5 && rect.height > window.innerHeight * 0.5) {
+          el.remove();
         }
-        if (node.nodeType === Node.ELEMENT_NODE && ['SCRIPT', 'STYLE', 'NOSCRIPT', 'CODE'].includes(node.tagName)) {
-          return NodeFilter.FILTER_REJECT;
-        }
-        return NodeFilter.FILTER_ACCEPT;
       }
-    });
+      if (el.tagName === 'IFRAME') {
+        try { el.style.pointerEvents = 'none'; } catch(e) {}
+      }
+    }
+  }
+  destroyTraps();
+  trapInterval = setInterval(destroyTraps, 2000);
 
-    let node;
-    const nodeMappingForThisBlock = []; // index -> textNode id
+  // 2. 미니멀 리모컨 UI 주입 (Shadow DOM)
+  const container = document.createElement('div');
+  container.style.position = 'fixed';
+  container.style.top = '20px';
+  container.style.left = '20px';
+  container.style.zIndex = '2147483647'; 
+  document.body.appendChild(container);
 
-    while ((node = walker.nextNode())) {
+  const shadow = container.attachShadow({ mode: 'closed' });
+  
+  const remote = document.createElement('div');
+  remote.style.display = 'flex';
+  remote.style.alignItems = 'center';
+  remote.style.gap = '15px';
+  remote.style.padding = '8px 16px';
+  remote.style.background = 'rgba(20, 20, 25, 0.95)';
+  remote.style.backdropFilter = 'blur(10px)';
+  remote.style.color = '#fff';
+  remote.style.borderRadius = '30px';
+  remote.style.fontFamily = 'system-ui, sans-serif';
+  remote.style.fontSize = '16px';
+  remote.style.boxShadow = '0 4px 12px rgba(0,0,0,0.5)';
+  remote.style.userSelect = 'none';
+  remote.style.touchAction = 'none'; 
+  
+  const btnClose = document.createElement('span');
+  btnClose.innerHTML = '✖';
+  btnClose.style.cursor = 'pointer';
+
+  const btnTranslate = document.createElement('div');
+  btnTranslate.innerHTML = '🌐 번역';
+  btnTranslate.style.cursor = 'pointer';
+  btnTranslate.style.fontWeight = 'bold';
+  btnTranslate.style.padding = '6px 12px';
+  btnTranslate.style.background = 'linear-gradient(135deg, #81c784, #83c5be)';
+  btnTranslate.style.color = '#000';
+  btnTranslate.style.borderRadius = '20px';
+
+  remote.appendChild(btnClose);
+  remote.appendChild(btnTranslate);
+  shadow.appendChild(remote);
+
+  // 드래그 로직
+  let isDragging = false, startX, startY, initialLeft, initialTop;
+  const onDragStart = (x, y) => {
+    isDragging = true; startX = x; startY = y;
+    initialLeft = parseInt(container.style.left || 0); initialTop = parseInt(container.style.top || 0);
+  };
+  const onDragMove = (e, x, y) => {
+    if (!isDragging) return;
+    e.preventDefault(); 
+    let newX = initialLeft + (x - startX);
+    let newY = initialTop + (y - startY);
+    newX = Math.max(0, Math.min(newX, window.innerWidth - remote.offsetWidth));
+    newY = Math.max(0, Math.min(newY, window.innerHeight - remote.offsetHeight));
+    container.style.left = `${newX}px`; container.style.top = `${newY}px`;
+  };
+  const onDragEnd = () => { isDragging = false; };
+  remote.addEventListener('touchstart', (e) => onDragStart(e.touches[0].clientX, e.touches[0].clientY), { passive: false });
+  remote.addEventListener('touchmove', (e) => onDragMove(e, e.touches[0].clientX, e.touches[0].clientY), { passive: false });
+  remote.addEventListener('touchend', onDragEnd);
+  remote.addEventListener('touchcancel', onDragEnd);
+  
+  btnClose.onclick = () => {
+      clearInterval(trapInterval); // 치명타 5 해결: 리모컨 닫을 때 setInterval 해제
+      const msg = JSON.stringify({ type: 'CLOSE_WEBVIEW' });
+      if (window.webkit?.messageHandlers?.cordova_iab) window.webkit.messageHandlers.cordova_iab.postMessage(msg);
+      else if (window.cordova_iab) window.cordova_iab.postMessage(msg);
+      else container.remove();
+  };
+
+  // 3. Colomo Parser (Base-52 + 1-Shot Streaming)
+  const EXCLUDE_TAGS = ['SCRIPT', 'STYLE', 'LINK', 'META', 'HEAD', 'NOSCRIPT', 'TEMPLATE', 'IFRAME'];
+  let textNodeMap = new Map();
+  let fallbackTimeout = null;
+
+  function toBase52(num) {
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    let res = "";
+    do {
+      res = chars[num % 52] + res;
+      num = Math.floor(num / 52);
+    } while (num > 0);
+    return res;
+  }
+
+  btnTranslate.onclick = () => {
+    if (btnTranslate.dataset.translating === 'true') return;
+    btnTranslate.dataset.translating = 'true';
+    btnTranslate.innerHTML = '⏳ 번역중...';
+    btnTranslate.style.background = '#FF9800';
+
+    textNodeMap.clear();
+    const textNodes = [];
+    
+    function walk(node) {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        if (EXCLUDE_TAGS.includes(node.tagName.toUpperCase())) return;
+        // Colomo: 숨김 태그 가볍게 스킵 (Blue Team 피드백: offsetWidth 사용)
+        if (node.offsetWidth === 0 && node.offsetHeight === 0) return;
+      }
       if (node.nodeType === Node.TEXT_NODE) {
-        const text = node.nodeValue;
-        if (text.trim().length > 0) {
-          hasText = true;
-          const tId = 'tn_' + (++nodeCounter);
-          textNodeMap.set(tId, node);
-          
-          // 텍스트를 플레이스홀더로 감싸기: <0>사과</0>
-          blockText += `<${localPlaceholderCount}>${text}</${localPlaceholderCount}>`;
-          nodeMappingForThisBlock.push(tId);
-          localPlaceholderCount++;
-        } else {
-          // 공백 노드 보존
-          blockText += text;
+        const text = node.nodeValue.trim();
+        if (text.length > 0 && isNaN(text)) {
+           if (node.parentElement && node.parentElement.offsetWidth === 0 && node.parentElement.offsetHeight === 0) return;
+           textNodes.push(node);
         }
-      } else if (node.nodeType === Node.ELEMENT_NODE && node.tagName === 'BR') {
-         blockText += '\n';
+      }
+      let child = node.firstChild;
+      while (child) {
+        walk(child);
+        child = child.nextSibling;
       }
     }
+    walk(document.body);
 
-    if (hasText) {
-      const blockId = 'b_' + (++nodeCounter);
-      element.setAttribute('data-block-id', blockId);
-      translationQueue.set(blockId, {
-        text: blockText,
-        mappings: nodeMappingForThisBlock
-      });
-    } else {
-      element.setAttribute('data-trans-state', 'ignored');
+    if (textNodes.length === 0) {
+      finishTranslation();
+      return;
     }
-  }
 
-  function flushQueue() {
-    if (translationQueue.size === 0) return;
-    const items = [];
-    translationQueue.forEach((data, id) => {
-      items.push({ id, text: data.text, mappings: data.mappings });
+    let payloadText = "";
+    textNodes.forEach((node, index) => {
+      const b52 = toBase52(index);
+      textNodeMap.set(b52, node);
+      // Colomo: 줄바꿈 제거 및 <| |> 마커 부착
+      const safeText = node.nodeValue.trim().replace(/\n/g, ' '); 
+      payloadText += `<|${b52}|> ${safeText}\n`;
     });
-    translationQueue.clear();
 
-    const msg = JSON.stringify({ type: 'TRANSLATE_REQ', data: items });
-    
-    // InAppBrowser 통신 브릿지
-    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.cordova_iab) {
-      window.webkit.messageHandlers.cordova_iab.postMessage(msg);
-    } else if (window.cordova_iab) {
-      window.cordova_iab.postMessage(msg);
-    } else {
-      window.parent.postMessage(msg, '*'); // 디버그용 폴백
-    }
+    const msg = JSON.stringify({ type: 'TRANSLATE_STREAM_REQ', data: payloadText });
+    if (window.webkit?.messageHandlers?.cordova_iab) window.webkit.messageHandlers.cordova_iab.postMessage(msg);
+    else if (window.cordova_iab) window.cordova_iab.postMessage(msg);
+    else window.parent.postMessage(msg, '*');
+
+    // 치명타 2 방어: 웹뷰 무한 대기 (좀비화) 방지 타임아웃
+    fallbackTimeout = setTimeout(() => {
+       if (btnTranslate.dataset.translating === 'true') {
+           finishTranslation();
+       }
+    }, 60000); // 60초 후 강제 복구
+  };
+
+  function finishTranslation() {
+      btnTranslate.dataset.translating = 'false';
+      btnTranslate.innerHTML = '✅ 완료';
+      btnTranslate.style.background = '#4CAF50';
+      if (fallbackTimeout) clearTimeout(fallbackTimeout);
+      textNodeMap.clear(); // 치명타 6 해결: 가비지 컬렉터가 메모리 회수하도록 강제 참조 해제
+      setTimeout(() => { 
+          btnTranslate.innerHTML = '🌐 번역'; 
+          btnTranslate.style.background = 'linear-gradient(135deg, #81c784, #83c5be)'; 
+      }, 3000);
   }
 
-  const observer = new MutationObserver((mutations) => {
-    let hasValidMutations = false;
-    for (const mutation of mutations) {
-      if (mutation.type === 'childList') {
-        mutation.addedNodes.forEach(node => {
-          if (node.nodeType === Node.ELEMENT_NODE && BLOCK_TAGS.has(node.tagName)) {
-            processBlock(node);
-            hasValidMutations = true;
-          } else if (node.nodeType === Node.TEXT_NODE && node.nodeValue.trim()) {
-            const parent = node.parentElement;
-            if (parent && !['SCRIPT', 'STYLE'].includes(parent.tagName) && !parent.hasAttribute('data-trans-state')) {
-              let block = parent;
-              while (block && block !== document.body && !BLOCK_TAGS.has(block.tagName)) {
-                block = block.parentElement;
-              }
-              if (block && BLOCK_TAGS.has(block.tagName)) {
-                processBlock(block);
-                hasValidMutations = true;
-              }
-            }
-          }
-        });
-      }
-    }
-    
-    if (hasValidMutations) {
-      clearTimeout(mutationTimeout);
-      // Debounce & RequestIdleCallback (Adversary's performance requirement)
-      mutationTimeout = setTimeout(() => {
-        if (window.requestIdleCallback) {
-          requestIdleCallback(flushQueue);
-        } else {
-          flushQueue();
-        }
-      }, 300);
-    }
-  });
-
-  observer.observe(document.body, { childList: true, subtree: true, characterData: true });
-
+  // Streaming Receiver
   window.addEventListener('message', (event) => {
     try {
       const msg = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
-      if (msg.type === 'TRANSLATE_RES') {
-        msg.data.forEach(item => { // item: { id: blockId, mappings: [...], translated: "..." }
-          const translatedText = item.translated;
-          
-          item.mappings.forEach((tId, index) => {
-             const node = textNodeMap.get(tId);
-             if (node && node.isConnected) {
-                // 정규식으로 번역문에서 해당 인덱스의 플레이스홀더 추출
-                // 예: <0>사과</0> -> 사과
-                const regex = new RegExp(`<\\s*${index}\\s*>([\\s\\S]*?)<\\s*\\/\\s*${index}\\s*>`, 'i');
-                const match = translatedText.match(regex);
-                
-                if (match) {
-                   node.nodeValue = match[1]; // XSS 차단 방어 성공
-                } else {
-                   // Adversary의 경고 반영: Fallback 방어코드
-                   // AI가 태그를 누락했을 경우 크래시를 방지
-                   if (item.mappings.length === 1) {
-                      // 노드가 1개뿐이라면 전체 번역문을 그대로 할당 (태그만 제거)
-                      node.nodeValue = translatedText.replace(/<\/?\d+>/g, '');
-                   }
-                }
-             }
-             textNodeMap.delete(tId); // 메모리 누수 방어 성공
-          });
-          
-          // 해당 블록의 상태를 완료로 마킹
-          const blockEl = document.querySelector(`[data-block-id="${item.id}"]`);
-          if (blockEl) blockEl.setAttribute('data-trans-state', 'translated');
+      if (msg.type === 'TRANSLATE_STREAM_UPDATE' || msg.type === 'TRANSLATE_STREAM_DONE') {
+        const updates = msg.data || [];
+        updates.forEach(item => {
+           const node = textNodeMap.get(item.id);
+           if (node && node.isConnected) {
+               node.nodeValue = item.text;
+           }
         });
+
+        if (msg.type === 'TRANSLATE_STREAM_DONE') {
+          finishTranslation();
+        }
       }
     } catch (e) { }
   });
-
-  // 초기 스캔
-  document.body.querySelectorAll(Array.from(BLOCK_TAGS).join(',')).forEach(processBlock);
-  flushQueue();
 })();
