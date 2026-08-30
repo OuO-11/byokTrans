@@ -4423,7 +4423,7 @@ Do NOT merge or skip any tags. Do NOT strip out any special brackets like 《》
       >
         {[
           { id: "library", label: "보관함", icon: FolderHeart },
-          { id: "translate", label: "실시간번역", icon: BookOpen },
+          { id: "translate", label: "홈", icon: BookOpen },
           { id: "presets", label: "번역 설정", icon: Settings },
           { id: "info", label: "이용 안내", icon: Info },
         ].map((tab) => {
