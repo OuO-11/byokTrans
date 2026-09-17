@@ -67,7 +67,7 @@ export function getActiveApiKey() {
  */
 export async function fetchAvailableModels(apiKey) {
   if (!apiKey) return [];
-  const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1alpha/models?key=${apiKey}`;
 
   try {
     const res = await fetch(url);
@@ -124,11 +124,14 @@ export async function translateTextWithRotation(
     if (!apiKey) {
       throw new Error("유효한 API Key를 찾을 수 없습니다.");
     }
+    if (!model) {
+      throw new Error("AI 모델이 선택되지 않았습니다.");
+    }
 
-    const cleanedModelName = model.startsWith("models/")
+    const cleanedModelName = String(model || "").startsWith("models/")
       ? model
       : `models/${model}`;
-    const url = `https://generativelanguage.googleapis.com/v1beta/${cleanedModelName}:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1alpha/${cleanedModelName}:generateContent?key=${apiKey}`;
 
     const requestBody = {
       contents: [
@@ -144,22 +147,11 @@ export async function translateTextWithRotation(
         topP: 0.8,
       },
       safetySettings: [
-        {
-          category: "HARM_CATEGORY_HARASSMENT",
-          threshold: "BLOCK_NONE",
-        },
-        {
-          category: "HARM_CATEGORY_HATE_SPEECH",
-          threshold: "BLOCK_NONE",
-        },
-        {
-          category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-          threshold: "BLOCK_NONE",
-        },
-        {
-          category: "HARM_CATEGORY_DANGEROUS_CONTENT",
-          threshold: "BLOCK_NONE",
-        },
+        { category: "HARM_CATEGORY_HARASSMENT", threshold: "OFF" },
+        { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "OFF" },
+        { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "OFF" },
+        { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "OFF" },
+        { category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: "OFF" },
       ],
     };
 
@@ -281,11 +273,14 @@ export async function translateTextStreamWithRotation(
     if (!apiKey) {
       throw new Error("유효한 API Key를 찾을 수 없습니다.");
     }
+    if (!model) {
+      throw new Error("AI 모델이 선택되지 않았습니다.");
+    }
 
-    const cleanedModelName = model.startsWith("models/")
+    const cleanedModelName = String(model || "").startsWith("models/")
       ? model
       : `models/${model}`;
-    const url = `https://generativelanguage.googleapis.com/v1beta/${cleanedModelName}:streamGenerateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1alpha/${cleanedModelName}:streamGenerateContent?key=${apiKey}`;
 
     const contentsArray = [
       {
@@ -311,22 +306,11 @@ export async function translateTextStreamWithRotation(
         topP: 0.8,
       },
       safetySettings: [
-        {
-          category: "HARM_CATEGORY_HARASSMENT",
-          threshold: "BLOCK_NONE",
-        },
-        {
-          category: "HARM_CATEGORY_HATE_SPEECH",
-          threshold: "BLOCK_NONE",
-        },
-        {
-          category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
-          threshold: "BLOCK_NONE",
-        },
-        {
-          category: "HARM_CATEGORY_DANGEROUS_CONTENT",
-          threshold: "BLOCK_NONE",
-        },
+        { category: "HARM_CATEGORY_HARASSMENT", threshold: "OFF" },
+        { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "OFF" },
+        { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "OFF" },
+        { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "OFF" },
+        { category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: "OFF" },
       ],
     };
 
@@ -427,7 +411,14 @@ export async function translateTextStreamWithRotation(
       }
       console.error(`[Stream Fetch Failure] Attempt ${attempts + 1}:`, error);
 
-      if (error.message.includes("status: 400")) throw error; // [57단계] 400 에러는 즉시 상위로 던짐
+      const errorMsg = error?.message || String(error);
+      if (
+        errorMsg.includes("status: 400") || 
+        errorMsg.includes("[NON_RETRIABLE]") || 
+        errorMsg.includes("[NON_RETRIABLE_SAFETY]")
+      ) {
+        throw error;
+      }
 
       rotateApiKey();
       attempts++;

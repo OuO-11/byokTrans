@@ -164,13 +164,13 @@
 
       for (let node of group) buildVirtual(node);
 
-      const plainText = template.replace(/<v\\d+>|<\\/v\\d+>/g, "").trim();
+      const plainText = template.replace(/<v\d+>|<\/v\d+>/g, "").trim();
       if (plainText.length > 0 && isNaN(plainText)) {
         const b52 = toBase52(idCounter++);
         groupMap.set(b52, { group, elements, parent: group[0].parentNode, anchor: group[group.length - 1].nextSibling });
         
-        const safeTemplate = template.replace(/\\n/g, ' ');
-        payloadText += \`<|\${b52}|> \${safeTemplate}\\n\`;
+        const safeTemplate = template.replace(/\n/g, ' ');
+        payloadText += `<|${b52}|> ${safeTemplate}\n`;
       }
     }
 
@@ -244,14 +244,14 @@
            const { group, elements, parent, anchor } = instance;
            if (!parent) return;
 
-           const doc = parser.parseFromString(\`<div>\${item.text}</div>\`, "text/html");
+           const doc = parser.parseFromString(`<div>${item.text}</div>`, "text/html");
            const wrapper = doc.body.firstChild;
 
            function reconstruct(parsedNode) {
              if (parsedNode.nodeType === Node.TEXT_NODE) {
                return document.createTextNode(parsedNode.nodeValue);
              } else if (parsedNode.nodeType === Node.ELEMENT_NODE) {
-               const match = parsedNode.tagName.toUpperCase().match(/^V(\\d+)$/);
+               const match = parsedNode.tagName.toUpperCase().match(/^V(\d+)$/);
                if (match) {
                  const idx = parseInt(match[1], 10);
                  const origEl = elements[idx];
