@@ -10,6 +10,7 @@
     const elements = document.querySelectorAll('*');
     for (let el of elements) {
       const style = window.getComputedStyle(el);
+      if (!style) continue;
       if (style.opacity !== '' && parseFloat(style.opacity) < 0.1 && !['SCRIPT', 'STYLE', 'META'].includes(el.tagName)) {
         const rect = el.getBoundingClientRect();
         if (rect.width > window.innerWidth * 0.5 && rect.height > window.innerHeight * 0.5) {
@@ -21,7 +22,7 @@
       }
     }
   }
-  destroyTraps();
+  try { destroyTraps(); } catch (e) { alert('destroyTraps error: ' + e); }
   trapInterval = setInterval(destroyTraps, 2000);
 
   // 2. 미니멀 리모컨 UI 주입 (Shadow DOM)

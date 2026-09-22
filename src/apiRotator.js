@@ -393,8 +393,9 @@ export async function translateTextStreamWithRotation(
         });
 
         if (currentFullText.length > accumulatedText.length) {
+          const delta = currentFullText.slice(accumulatedText.length);
           accumulatedText = currentFullText;
-          onChunk(accumulatedText);
+          onChunk(delta);
         }
       }
 
