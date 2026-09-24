@@ -7,7 +7,7 @@ export default function HomeTab({ handleUrlChange, handleTranslateStart, handleC
   const { inputUrl, isTranslating, transProgress, transMode, setTransMode } = useViewerStore();
   const { selectedLang, setSelectedLang, selectedPreset, setSelectedPreset, promptsTree } = useSettingsStore();
 
-  const currentPresets = promptsTree[selectedLang] || {};
+  const currentPresets = promptsTree[selectedLang]?.presets || {};
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>

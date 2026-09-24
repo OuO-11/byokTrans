@@ -1752,7 +1752,7 @@ Do NOT merge or skip any markers. Do NOT strip out any special brackets like 《
       
 
         {/* 탭 5: 설정 & 프롬프트/테마 커스텀 대시보드 (Settings/Presets) */}
-                {activeTab === "presets" && <SettingsTab handleSaveSettings={handleSaveSettings} getCacheStatistics={getCacheStatistics} />}
+                {activeTab === "presets" && <SettingsTab handleSaveSettings={handleSaveSettings} getCacheStatistics={getCacheStatistics} handleClearCache={handleClearCache} handleBackupDownload={handleBackupDownload} handleBackupUpload={handleBackupUpload} />}
       </main>
 
       {/* 49단계: 프롬프트 전체화면 모달 */}
