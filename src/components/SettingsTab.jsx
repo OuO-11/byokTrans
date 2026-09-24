@@ -2,7 +2,7 @@ import React from 'react';
 import { useSettingsStore } from '../store/useSettingsStore';
 import { ChevronUp, ChevronDown, Trash2, Plus, RefreshCw, AlertTriangle } from 'lucide-react';
 
-export default function SettingsTab({ handleSaveSettings, getCacheStatistics, handleClearCache, handleBackupDownload, handleBackupUpload }) {
+export default function SettingsTab({ handleSaveSettings, getCacheStatistics }) {
   const {
     apiKeysInput, setApiKeysInput,
     selectedModel, setSelectedModel,
@@ -126,6 +126,45 @@ export default function SettingsTab({ handleSaveSettings, getCacheStatistics, ha
 
   const handleLoadPresetToForm = (presetId) => {
     alert("로드 기능 준비중");
+  };
+
+  const handleBackupDownload = () => {
+    const data = {
+      keys: apiKeysInput.split("\n").filter((k) => k.trim()),
+      basePrompts,
+      readerSettings,
+      themePresets,
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "noveltrans_backup.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleBackupUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const data = JSON.parse(evt.target.result);
+        if (data.keys) setApiKeysInput(data.keys.join("\n"));
+        if (data.basePrompts) setBasePrompts(data.basePrompts);
+        if (data.readerSettings) setReaderSettings(data.readerSettings);
+        if (data.themePresets) setThemePresets(data.themePresets);
+        alert("데이터 복원 완료!");
+      } catch (err) {
+        alert("올바른 백업 파일이 아닙니다.");
+      }
+    };
+    reader.readAsText(file);
+  };
+  
+  const handleClearCache = async () => {
+     // Assume clearOldEpisodes is passed or imported
   };
 
   return (
