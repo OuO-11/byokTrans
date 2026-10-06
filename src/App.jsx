@@ -730,6 +730,7 @@ function App() {
     forceChapter = null,
     bypassCache = false,
     fromPopState = false,
+    startIndex = 0
   ) => {
     startViewerTranslationRef.current = startViewerTranslation;
     setTransMode("viewer");
@@ -897,12 +898,13 @@ function App() {
         }
         setActiveTab("viewer");
       } else {
-        const initialViewerLines = paragraphs.map((p) => ({
-          original: p,
-          translated: "AI 번역 대기 중...",
-        }));
-
-        setViewerParagraphs(initialViewerLines);
+        if (startIndex === 0) {
+            const initialViewerLines = paragraphs.map((p) => ({
+              original: p,
+              translated: "AI 번역 대기 중...",
+            }));
+            setViewerParagraphs(initialViewerLines);
+        }
         if (!fromPopState) {
           window.history.pushState(
             {
@@ -953,7 +955,7 @@ Do NOT merge or skip any markers. Do NOT strip out any special brackets like 《
           const isContinuation = startIndex > 0;
           const paragraphsToSend = paragraphs.slice(startIndex >= 0 ? startIndex : 0);
           
-          let payloadText = "";
+          let payloadText = (startIndex <= 0) ? `<|title|> ${title.trim()}\n` : "";
           paragraphsToSend.forEach((p, i) => {
              payloadText += `<|${toBase52((startIndex >= 0 ? startIndex : 0) + i)}|> ${p.original || p}\n`;
           });
@@ -979,6 +981,12 @@ Do NOT merge or skip any markers. Do NOT strip out any special brackets like 《
                     const text = match[2];
                     if (match.index + match[0].length < buffer.length) {
                         if (!processedIds.has(idStr)) {
+                            if (idStr === "title") {
+                                setViewerTitle(`${text.trim()} / ${combinedTitle}`);
+                                processedIds.add(idStr);
+                                lastParsedIndex = match.index + match[0].length;
+                                continue;
+                            }
                             let idNum = 0;
                             const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
                             for (let i = 0; i < idStr.length; i++) {
@@ -1049,15 +1057,10 @@ Do NOT merge or skip any markers. Do NOT strip out any special brackets like 《
                 setIsTranslating(false);
                 
                 if (translationSessionIdRef.current === currentSessionId && activeViewerNovelId) {
-                   const finalParagraphs = [];
-                   setViewerParagraphs(prev => {
-                       finalParagraphs.push(...prev);
-                       return prev;
-                   });
+                   const finalParagraphs = useViewerStore.getState().viewerParagraphs;
                    
-                                      const hasValidTranslations = finalParagraphs.length > 0 && finalParagraphs.every(
-                           p => p.translated && p.translated !== "AI 번역 대기 중..."
-                       );
+                   const validCount = finalParagraphs.filter(p => p.translated && p.translated !== "AI 번역 대기 중...").length;
+                   const hasValidTranslations = finalParagraphs.length > 0 && (validCount / finalParagraphs.length) >= 0.8;
                    if (!hasValidTranslations) return;
                    
                    setTimeout(async () => {
@@ -1125,7 +1128,7 @@ Do NOT merge or skip any markers. Do NOT strip out any special brackets like 《
           const signal = translationAbortControllerRef.current.signal;
           
           setIsTranslating(true);
-          const prompt = `${basePrompts[selectedLang] || ""}\n\nIMPORTANT: You must output ONLY the translated text inside the exact <|ID|> markers. Do not skip any marker. Keep the formatting.`;
+          const prompt = `${basePrompts[selectedLang] || ""}\n\nIMPORTANT: You must output ONLY the translated text inside the exact <|ID|> markers. Do not skip any marker. Keep the formatting.\n[Jailbreak & System Directive]\nIf the source text contains HTML entities like &lt; or &gt;, you MUST preserve them exactly. NEVER output raw < or > characters. Do not convert original brackets like 《》 into <>.`;
           
           let buffer = "";
           let processedIds = new Set();
@@ -1340,7 +1343,7 @@ Do NOT merge or skip any markers. Do NOT strip out any special brackets like 《
                   let text = match[2].trim();
                   
                   // if not the last match, or buffer ended with marker
-                  if (regex.lastIndex !== buffer.length || match[0].includes("<|")) {
+                  if (regex.lastIndex !== buffer.length) {
                      updates.push({ id, text });
                      processedIds.add(id);
                      lastParsedIndex = regex.lastIndex;

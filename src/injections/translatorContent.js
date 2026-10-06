@@ -134,9 +134,16 @@
   }
 
   btnTranslate.onclick = () => {
-    if (btnTranslate.dataset.translating === 'true') return;
+    if (btnTranslate.dataset.translating === 'true') {
+        const msg = JSON.stringify({ type: 'TRANSLATE_ABORT' });
+        if (window.webkit?.messageHandlers?.cordova_iab) window.webkit.messageHandlers.cordova_iab.postMessage(msg);
+        else if (window.cordova_iab) window.cordova_iab.postMessage(msg);
+        else window.parent.postMessage(msg, '*');
+        finishTranslation();
+        return;
+    }
     btnTranslate.dataset.translating = 'true';
-    btnTranslate.innerHTML = '번역중...';
+    btnTranslate.innerHTML = '⏹ 중단';
     btnTranslate.style.background = '#FF9800';
 
     groupMap.clear();
@@ -221,14 +228,10 @@
 
   function finishTranslation() {
       btnTranslate.dataset.translating = 'false';
-      btnTranslate.innerHTML = '번역완료';
+      btnTranslate.innerHTML = '재번역';
       btnTranslate.style.background = '#4CAF50';
       if (fallbackTimeout) clearTimeout(fallbackTimeout);
       groupMap.clear(); // 가비지 컬렉터 메모리 회수 유도
-      setTimeout(() => { 
-          btnTranslate.innerHTML = '웹 번역'; 
-          btnTranslate.style.background = 'linear-gradient(135deg, #81c784, #83c5be)'; 
-      }, 3000);
   }
 
   // Streaming Receiver

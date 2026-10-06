@@ -31,7 +31,7 @@ export default function SettingsTab({ handleSaveSettings, getCacheStatistics }) 
     backupText, setBackupText
   } = useSettingsStore();
 
-  const currentPresets = promptsTree[selectedLang]?.presets || {};
+  const currentPresets = promptsTree?.[selectedLang]?.presets || {};
 
   const handleSyncModels = async () => {
     try {
@@ -173,7 +173,7 @@ export default function SettingsTab({ handleSaveSettings, getCacheStatistics }) 
             style={{ display: "flex", flexDirection: "column", gap: "24px" }}
           >
             <h3 style={{ margin: 0, fontSize: "18px", fontWeight: "bold" }}>
-              번역 설정 및 커스터마이징
+              번역 설정
             </h3>
 
             {/* 구글 API Key 및 모델 설정 */}
@@ -780,7 +780,7 @@ export default function SettingsTab({ handleSaveSettings, getCacheStatistics }) 
                     <div
                       style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}
                     >
-                      {Object.keys(themePresets).map((presetName) => (
+                      {Object.keys(themePresets || {}).map((presetName) => (
                         <div
                           key={presetName}
                           style={{

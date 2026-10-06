@@ -12,7 +12,7 @@ export default function HomeTab({ handleUrlChange, handleTranslateStart, handleC
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
       <h3 style={{ margin: 0, fontSize: "18px", fontWeight: "bold" }}>
-        🚀 번역 기동 시작
+        AI 실시간 번역 시작
       </h3>
 
       <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>

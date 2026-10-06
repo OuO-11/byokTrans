@@ -5,7 +5,7 @@ export default function LibraryTab({ novels, handleLoadNovel, handleDownload, ha
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
       <h3 style={{ margin: 0, fontSize: "18px", fontWeight: "bold" }}>
-        📚 소설 보관함
+        내 소설 보관함
       </h3>
 
       {novels.length === 0 ? (

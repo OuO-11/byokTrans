@@ -55,6 +55,13 @@ class WebViewManager {
         return;
     }
 
+    if (msg.type === 'TRANSLATE_ABORT') {
+        if (this.config && this.config.onAbort) {
+            this.config.onAbort();
+        }
+        return;
+    }
+
     if (msg.type === 'TRANSLATE_STREAM_REQ' && msg.data) {
       if (this.config && this.config.onTranslateStreamReq) {
         try {
