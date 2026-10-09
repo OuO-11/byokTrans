@@ -1,42 +1,71 @@
 const PROMPT_STORAGE_KEY = "noveltrans_prompts_tree";
 
-// 기본 기본적으로 탑재될 중국어 및 일본어 프리셋 정의
+const HONORIFICS_PROMPT = `[HONORIFICS / SPEECH LEVEL] (CRITICAL)
+Distinguish clearly between polite speech and casual speech.
+Determine speech level based on relationship, age, rank, context, and emotional distance.
+
+Use polite speech when:
+strangers meeting first time
+juniors speaking to seniors
+employees to bosses
+formal situations
+respectful or distant relationships
+Use casual speech when:
+close friends
+family members
+lovers
+same-age close peers
+speaking downward in hierarchy
+angry / emotional outbursts (if natural)
+
+IMPORTANT:
+Speech level changes must reflect story progression.
+If characters become closer, speech may soften naturally.
+If conflict occurs, speech may become colder or harsher.
+NEVER make all dialogue uniformly casual.
+NEVER make all dialogue uniformly polite.
+
+KOREAN NATURALNESS
+
+Use natural Korean dialogue such as:
+Polite:
+주세요
+괜찮으세요?
+그러셨군요
+먼저 가보겠습니다
+Casual:
+줘
+괜찮아?
+그렇구나
+먼저 갈게
+
+CONSISTENCY
+
+Each character should maintain a consistent speaking style unless the relationship changes.`;
+
 const DEFAULT_PROMPTS_TREE = {
   chinese: {
     name: "중국어 번역기",
+    basePrompt: "당신은 중국어 전문 번역가이다. [지침]\n직역투를 피하며 최대한 자연스럽게 의역하되, 원문의 말투와 내용은 철저히 유지. 원문의 사실 관계를 왜곡하거나 고유명사의 과한 현지화 금지.\n일본어 고유명사는 국립국어원 표기법을 무시하고 해당 장르 및 작품에서 대중에게 친숙한 서브컬처 통용 표기를 최우선하되, 통용 표기가 불확실하다면 실제 일본어 발음에 가깝게 표기.\n일본어가 아닌 중국어 고유명사는 원어 발음 대신 한국 한자음을 엄격히 지키며 표기.",
     presets: {
       default: {
-        name: "기본 소설체 번역",
-        content:
-          "You are a professional literary translator specializing in translating Chinese web novels (wuxia, xianxia, BL, romance) into natural, fluent, and engaging Korean.\n\n1. Translate the source text into natural Korean novel style (소설체). Avoid mechanical direct translation (직역).\n2. Translate dialogues (대화) using natural Korean colloquial style (구어체).\n3. Return only the translated Korean text without any notes or original Chinese.",
-      },
-      conan: {
-        name: "명탐정 코난 특화 번역",
-        content:
-          "You are translating a Chinese Detective Conan (명탐정 코난) fanfiction into natural Korean. \n\n1. Match character names with official Korean localizations:\n- 江户川柯南 / 柯南 -> 코난\n- 工藤新一 -> 남도일\n- 毛利兰 -> 유미란\n- 灰原哀 -> 홍장미\n- 安室透 / 降谷零 -> 안기준 / 강준영\n- 赤井秀一 -> 이상윤\n2. Translate in a natural novel tone, preserving mystery/detective jargon in standard Korean localizations.",
-      },
-      naruto: {
-        name: "나루토 특화 번역",
-        content:
-          "You are translating a Chinese Naruto (나루토) fanfiction into natural Korean.\n\n1. Use official Korean Naruto terms and names:\n- 漩涡鸣人 / 鸣人 -> 나루토\n- 宇智波佐助 / 佐助 -> 사스케\n- 春野樱 / 小樱 -> 사쿠라\n- 旗木卡卡西 -> 카카시\n- 自来也 -> 지라이야\n- 纲手 -> 츠나데\n- 宇智波鼬 -> 이타치\n2. Translate ninja techniques (술법) into natural Korean official names.",
+        name: "기본소설체번역",
+        content: HONORIFICS_PROMPT,
       },
     },
   },
   japanese: {
     name: "일본어 번역기",
+    basePrompt: "당신은 일본어 전문 번역가이다. [지침]\n직역투를 피하며 최대한 자연스럽게 의역하되, 원문의 말투와 내용은 철저히 유지. 원문의 사실 관계를 왜곡하거나 고유명사의 과한 현지화 금지.\n일본어 고유명사는 국립국어원 표기법을 무시하고 해당 장르 및 작품에서 대중에게 친숙한 서브컬처 통용 표기를 최우선하되, 통용 표기가 불확실하다면 실제 일본어 발음에 가깝게 표기.\n일본어가 아닌 중국어 고유명사는 원어 발음 대신 한국 한자음을 엄격히 지키며 표기.",
     presets: {
       default: {
-        name: "기본 소설체 번역",
-        content:
-          "You are a professional literary translator specializing in translating Japanese web novels (light novels, fantasy, romance) into natural and engaging Korean.\n\n1. Translate into fluent Korean light novel style. Avoid direct translation of Japanese grammar style (e.g., '~의 경우', '~에 있어서' 같은 직역 지양).\n2. Translate dialogues naturally based on character relationships.\n3. Return only the Korean translation.",
+        name: "기본소설체번역",
+        content: HONORIFICS_PROMPT,
       },
     },
   },
 };
 
-/**
- * 저장소에서 전체 계층형 프롬프트 트리를 불러옵니다. (비어있으면 기본 구조로 초기화)
- */
 export function getPromptsTree() {
   const data = localStorage.getItem(PROMPT_STORAGE_KEY);
   if (!data) {
@@ -47,38 +76,78 @@ export function getPromptsTree() {
     return DEFAULT_PROMPTS_TREE;
   }
   try {
-    return JSON.parse(data);
+    const tree = JSON.parse(data);
+    // 마이그레이션: 기존 데이터에 basePrompt가 없거나 구조가 다르면 기본값으로 채워줌
+    let migrated = false;
+    for (const langKey of Object.keys(DEFAULT_PROMPTS_TREE)) {
+      if (!tree[langKey]) {
+        tree[langKey] = DEFAULT_PROMPTS_TREE[langKey];
+        migrated = true;
+      } else if (!tree[langKey].basePrompt) {
+        tree[langKey].basePrompt = DEFAULT_PROMPTS_TREE[langKey].basePrompt;
+        migrated = true;
+      }
+    }
+    // 쓸데없는 프리셋 강제 삭제 마이그레이션 (선택사항)
+    if (tree.chinese?.presets?.conan) {
+      delete tree.chinese.presets.conan;
+      migrated = true;
+    }
+    if (tree.chinese?.presets?.naruto) {
+      delete tree.chinese.presets.naruto;
+      migrated = true;
+    }
+    if (migrated) {
+      savePromptsTree(tree);
+    }
+    return tree;
   } catch (e) {
     console.error("Failed to parse prompt tree:", e);
     return DEFAULT_PROMPTS_TREE;
   }
 }
 
-/**
- * 프롬프트 트리를 로컬 저장소에 영구 저장합니다.
- */
 export function savePromptsTree(tree) {
   localStorage.setItem(PROMPT_STORAGE_KEY, JSON.stringify(tree));
 }
 
-/**
- * 새로운 언어 분류(대분류)를 추가합니다.
- */
-export function addLanguageCategory(langId, langName) {
+export function addLanguageCategory(langId, langName, basePromptText = "") {
   const tree = getPromptsTree();
   if (tree[langId]) return false; // 이미 존재하는 언어 코드
 
   tree[langId] = {
     name: langName,
-    presets: {},
+    basePrompt: basePromptText,
+    presets: {
+      default: {
+        name: "기본소설체번역",
+        content: HONORIFICS_PROMPT,
+      }
+    },
   };
   savePromptsTree(tree);
   return tree;
 }
 
-/**
- * 특정 언어 분류 하위에 상세 프리셋(소분류)을 추가하거나 수정합니다.
- */
+export function updateLanguageCategory(langId, langName, basePromptText) {
+  const tree = getPromptsTree();
+  if (!tree[langId]) throw new Error(`존재하지 않는 언어 분류 코드입니다: ${langId}`);
+  
+  tree[langId].name = langName;
+  tree[langId].basePrompt = basePromptText;
+  savePromptsTree(tree);
+  return tree;
+}
+
+export function deleteLanguageCategory(langId) {
+  const tree = getPromptsTree();
+  if (tree[langId]) {
+    delete tree[langId];
+    savePromptsTree(tree);
+  }
+  return tree;
+}
+
 export function savePreset(langId, presetId, presetName, content) {
   const tree = getPromptsTree();
   if (!tree[langId]) {
@@ -93,9 +162,6 @@ export function savePreset(langId, presetId, presetName, content) {
   return tree;
 }
 
-/**
- * 특정 프리셋을 삭제합니다.
- */
 export function deletePreset(langId, presetId) {
   const tree = getPromptsTree();
   if (tree[langId] && tree[langId].presets[presetId]) {
@@ -105,18 +171,19 @@ export function deletePreset(langId, presetId) {
   return tree;
 }
 
-/**
- * 특정 언어의 특정 프리셋 프롬프트 본문을 빠르게 단독 조회합니다.
- */
 export function getPromptContent(langId, presetId) {
   const tree = getPromptsTree();
   const preset = tree[langId]?.presets?.[presetId];
   if (!preset) {
-    // 찾을 수 없다면 해당 언어의 default를, 그것도 없다면 전체 기본값을 반환
     return (
       tree[langId]?.presets?.default?.content ||
       DEFAULT_PROMPTS_TREE.chinese.presets.default.content
     );
   }
   return preset.content;
+}
+
+export function getBasePrompt(langId) {
+  const tree = getPromptsTree();
+  return tree[langId]?.basePrompt || DEFAULT_PROMPTS_TREE.chinese.basePrompt;
 }

@@ -1,13 +1,12 @@
 import React from 'react';
 import { useSettingsStore } from '../store/useSettingsStore';
+import { savePreset, deletePreset } from '../promptManager.js';
 import { ChevronUp, ChevronDown, Trash2, Plus, RefreshCw, AlertTriangle } from 'lucide-react';
-
 export default function SettingsTab({ handleSaveSettings, getCacheStatistics }) {
   const {
     apiKeysInput, setApiKeysInput,
     selectedModel, setSelectedModel,
     availableModels, setAvailableModels,
-    basePrompts, setBasePrompts,
     promptsTree, setPromptsTree, refreshPromptsTree,
     selectedLang, setSelectedLang,
     selectedPreset, setSelectedPreset,
@@ -62,9 +61,40 @@ export default function SettingsTab({ handleSaveSettings, getCacheStatistics }) 
   };
 
   const handleUpdateBasePrompt = (lang, value) => {
-    const updated = { ...basePrompts, [lang]: value };
-    setBasePrompts(updated);
-    localStorage.setItem("noveltrans_base_prompts", JSON.stringify(updated));
+    try {
+      const updatedTree = updateLanguageCategory(lang, promptsTree[lang].name, value);
+      setPromptsTree(updatedTree);
+    } catch(e) {
+      console.error(e);
+    }
+  };
+  
+  const handleAddLanguage = () => {
+    const langId = prompt("새 번역기(언어) 코드를 영문으로 입력하세요. (예: english)");
+    if (!langId) return;
+    const langName = prompt("새 번역기의 이름을 입력하세요. (예: 영어 번역기)");
+    if (!langName) return;
+    
+    if (promptsTree[langId]) {
+      alert("이미 존재하는 언어 코드입니다.");
+      return;
+    }
+    const updatedTree = addLanguageCategory(langId, langName);
+    setPromptsTree(updatedTree);
+    setSelectedLang(langId);
+  };
+  
+  const handleDeleteLanguage = (langId) => {
+    const keys = Object.keys(promptsTree);
+    if (keys.length <= 1) {
+      alert("최소 1개의 번역기는 유지해야 합니다.");
+      return;
+    }
+    if (confirm(`정말로 '${promptsTree[langId].name}' 번역기를 삭제하시겠습니까?`)) {
+      const updatedTree = deleteLanguageCategory(langId);
+      setPromptsTree(updatedTree);
+      setSelectedLang(Object.keys(updatedTree)[0]);
+    }
   };
 
   const handleSaveThemePreset = () => {
@@ -114,24 +144,77 @@ export default function SettingsTab({ handleSaveSettings, getCacheStatistics }) 
   };
 
   const handleAddCustomPreset = () => {
-    // (Implementation preserved for brevity or assume it uses promptManager)
-    // Wait, handleAddCustomPreset calls savePreset from promptManager.
-    // I will let it be and make sure to import it.
-    alert("프리셋 기능은 준비중입니다 (마이그레이션 중)");
+    if (!newPresetName) {
+      return alert("프리셋 이름을 입력해 주세요.");
+    }
+    if (editingPresetId && editingPresetId !== "default") {
+      try {
+        const updatedTree = savePreset(
+          selectedLang,
+          editingPresetId,
+          newPresetName,
+          newPresetContent,
+        );
+        setPromptsTree(updatedTree);
+        setEditingPresetId(null);
+        setNewPresetName("");
+        setNewPresetContent("");
+        alert("프리셋이 수정 저장되었습니다.");
+      } catch (e) {
+        alert(e.message);
+      }
+      return;
+    }
+    if (!newPresetContent) {
+      return alert("프리셋 내용을 입력해 주세요.");
+    }
+    const presetId = "custom_" + Date.now();
+    try {
+      const updatedTree = savePreset(
+        selectedLang,
+        presetId,
+        newPresetName,
+        newPresetContent,
+      );
+      setPromptsTree(updatedTree);
+      setSelectedPreset(presetId);
+      setNewPresetName("");
+      setNewPresetContent("");
+      alert("새로운 프롬프트 템플릿이 성공적으로 저장되었습니다!");
+    } catch (e) {
+      alert(e.message);
+    }
   };
 
   const handleDeletePreset = (presetId) => {
-    alert("삭제 기능 준비중");
+    if (presetId === "default") {
+      return alert("기본 프리셋은 삭제할 수 없습니다.");
+    }
+    if (window.confirm("이 프롬프트 프리셋을 삭제하시겠습니까?")) {
+      const updatedTree = deletePreset(selectedLang, presetId);
+      setPromptsTree(updatedTree);
+      setSelectedPreset("default");
+      setEditingPresetId(null);
+      if (editingPresetId === presetId) {
+        setNewPresetName("");
+        setNewPresetContent("");
+      }
+    }
   };
 
   const handleLoadPresetToForm = (presetId) => {
-    alert("로드 기능 준비중");
+    if (presetId === "default") return;
+    const preset = currentPresets[presetId];
+    if (!preset) return;
+    setEditingPresetId(presetId);
+    setNewPresetName(preset.name || "");
+    setNewPresetContent(preset.content || "");
   };
 
   const handleBackupDownload = () => {
     const data = {
       keys: apiKeysInput.split("\n").filter((k) => k.trim()),
-      basePrompts,
+      
       readerSettings,
       themePresets,
     };
@@ -152,7 +235,7 @@ export default function SettingsTab({ handleSaveSettings, getCacheStatistics }) 
       try {
         const data = JSON.parse(evt.target.result);
         if (data.keys) setApiKeysInput(data.keys.join("\n"));
-        if (data.basePrompts) setBasePrompts(data.basePrompts);
+        
         if (data.readerSettings) setReaderSettings(data.readerSettings);
         if (data.themePresets) setThemePresets(data.themePresets);
         alert("데이터 복원 완료!");
@@ -386,7 +469,7 @@ export default function SettingsTab({ handleSaveSettings, getCacheStatistics }) 
                         onClick={() =>
                           openPresetModal(
                             "basePrompt",
-                            basePrompts[selectedLang],
+                            (promptsTree[selectedLang]?.basePrompt || ''),
                           )
                         }
                         style={{
@@ -405,7 +488,7 @@ export default function SettingsTab({ handleSaveSettings, getCacheStatistics }) 
                     </div>
                     <textarea
                       rows={6}
-                      value={basePrompts[selectedLang]}
+                      value={(promptsTree[selectedLang]?.basePrompt || '')}
                       onChange={(e) =>
                         handleUpdateBasePrompt(selectedLang, e.target.value)
                       }

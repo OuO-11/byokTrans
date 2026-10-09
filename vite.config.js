@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+﻿import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
 export default defineConfig({
@@ -6,7 +6,7 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      // 로컬 개발 시 /api/proxy 호출을 Flask 백엔드로 포워딩
+      // 濡쒖뺄 媛쒕컻 ??/api/proxy ?몄텧??Flask 諛깆뿏?쒕줈 ?ъ썙??
       "/api": {
         target: "http://127.0.0.1:5000",
         changeOrigin: true,
@@ -15,7 +15,9 @@ export default defineConfig({
     },
   },
   build: {
-    // Vercel이 빌드된 정적 리소스를 올바로 찾을 수 있도록 outDir 지정
+    // Vercel??鍮뚮뱶???뺤쟻 由ъ냼?ㅻ? ?щ컮濡?李얠쓣 ???덈룄濡?outDir 吏??
     outDir: "dist",
+    sourcemap: true,
   },
 });
+

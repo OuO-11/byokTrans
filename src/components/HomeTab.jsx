@@ -59,8 +59,11 @@ export default function HomeTab({ handleUrlChange, handleTranslateStart, handleC
               color: "var(--text-main)",
             }}
           >
-            <option value="chinese">중국어 번역기</option>
-            <option value="japanese">일본어 번역기</option>
+            {Object.keys(promptsTree).map(langId => (
+              <option key={langId} value={langId}>
+                {promptsTree[langId].name}
+              </option>
+            ))}
           </select>
         </div>
 

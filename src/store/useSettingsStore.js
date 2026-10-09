@@ -3,13 +3,6 @@ import { getPromptsTree } from '../promptManager.js';
 
 const DEFAULT_MODELS = ["gemini-3.5-flash-lite", "gemini-3.6-flash", "gemma-4-26b"];
 
-const DEFAULT_BASE_PROMPTS = {
-  chinese:
-    "당신은 프로페셔널 웹소설 번역가입니다. 원문을 한국어 웹소설 스타일에 맞게 번역하세요.\n\n[주요 지침]\n- 직역투를 피하고 최대한 자연스러운 의역을 제공할 것.\n- 등장인물의 어투와 성격을 일관되게 유지할 것.",
-  japanese:
-    "당신은 프로페셔널 웹소설 번역가입니다. 원문을 한국어 웹소설 스타일에 맞게 번역하세요.\n\n[주요 지침]\n- 직역투를 피하고 최대한 자연스러운 의역을 제공할 것.\n- 일본어 서브컬처 특유의 뉘앙스를 한국 독자가 읽기 편하게 살릴 것.",
-};
-
 const DEFAULT_READER_SETTINGS = {
   fontSize: 16,
   lineHeight: 1.8,
@@ -43,14 +36,6 @@ export const useSettingsStore = create((set, get) => ({
   },
 
   // --- 2. Prompts & Languages ---
-  basePrompts: localStorage.getItem("noveltrans_base_prompts")
-    ? JSON.parse(localStorage.getItem("noveltrans_base_prompts"))
-    : DEFAULT_BASE_PROMPTS,
-  setBasePrompts: (prompts) => {
-    set({ basePrompts: prompts });
-    localStorage.setItem("noveltrans_base_prompts", JSON.stringify(prompts));
-  },
-  
   promptsTree: getPromptsTree(),
   setPromptsTree: (tree) => set({ promptsTree: tree }),
   refreshPromptsTree: () => set({ promptsTree: getPromptsTree() }),
