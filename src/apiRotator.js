@@ -67,7 +67,7 @@ export function getActiveApiKey() {
  */
 export async function fetchAvailableModels(apiKey) {
   if (!apiKey) return [];
-  const url = `https://generativelanguage.googleapis.com/v1alpha/models?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
 
   try {
     const res = await fetch(url);
@@ -131,7 +131,7 @@ export async function translateTextWithRotation(
     const cleanedModelName = String(model || "").startsWith("models/")
       ? model
       : `models/${model}`;
-    const url = `https://generativelanguage.googleapis.com/v1alpha/${cleanedModelName}:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/${cleanedModelName}:generateContent?key=${apiKey}`;
 
     const requestBody = {
       contents: [
@@ -145,6 +145,9 @@ export async function translateTextWithRotation(
       generationConfig: {
         temperature: 0.8,
         topP: 0.8,
+        thinkingConfig: {
+          thinkingBudget: 0,
+        },
       },
       safetySettings: [
         { category: "HARM_CATEGORY_HARASSMENT", threshold: "OFF" },
@@ -280,7 +283,7 @@ export async function translateTextStreamWithRotation(
     const cleanedModelName = String(model || "").startsWith("models/")
       ? model
       : `models/${model}`;
-    const url = `https://generativelanguage.googleapis.com/v1alpha/${cleanedModelName}:streamGenerateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/${cleanedModelName}:streamGenerateContent?key=${apiKey}`;
 
     const contentsArray = [
       {
@@ -304,6 +307,9 @@ export async function translateTextStreamWithRotation(
       generationConfig: {
         temperature: 0.8,
         topP: 0.8,
+        thinkingConfig: {
+          thinkingBudget: 0,
+        },
       },
       safetySettings: [
         { category: "HARM_CATEGORY_HARASSMENT", threshold: "OFF" },
